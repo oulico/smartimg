@@ -1,0 +1,14 @@
+{
+  "name": "@smartimg/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/cdn.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

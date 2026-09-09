@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: smartimg private originals bucket, delivered through CloudFront + AWS DIT
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Globally unique name for the image originals bucket
+  AdminOrigin:
+    Type: String
+    Default: http://localhost:5173
+    Description: Origin allowed to PUT directly to S3 with presigned URLs (browser CORS)
+
+Resources:
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      AccessControl: Private
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods:
+              - PUT
+            AllowedOrigins:
+              - !Ref AdminOrigin
+            AllowedHeaders:
+              - '*'
+            ExposeHeaders:
+              - ETag
+            MaxAge: 3000
+
+Outputs:
+  BucketName:
+    Description: Name of the originals bucket
+    Value: !Ref ImagesBucket
+  BucketRegionalDomainName:
+    Description: Regional endpoint of the bucket
+    Value: !GetAtt ImagesBucket.RegionalDomainName

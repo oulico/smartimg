@@ -1,0 +1,18 @@
+@import "@uppy/dashboard/dist/style.min.css";
+@import "tailwindcss";
+
+@theme {
+  --color-background: #ffffff;
+  --color-foreground: #09090b;
+  --color-muted: #f4f4f5;
+  --color-muted-foreground: #71717a;
+  --color-border: #e4e4e7;
+  --color-primary: #18181b;
+  --color-primary-foreground: #ffffff;
+  --color-destructive: #dc2626;
+  --color-ring: #a1a1aa;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+}

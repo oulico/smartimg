@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.smartimg.image-drop-agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BUN__</string>
+    <string>__PROJECT__/agent/src/main.ts</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>IMAGE_API_URL</key>
+    <string>http://127.0.0.1:8787/api</string>
+    <key>IMAGE_API_TOKEN</key>
+    <string>__TOKEN__</string>
+    <key>IMAGE_CDN_BASE</key>
+    <string>http://127.0.0.1:8787/mock-cdn</string>
+    <key>AGENT_ROOT</key>
+    <string>__HOME__/ImageDrop</string>
+    <key>IMAGE_FOLDER</key>
+    <string>uploads</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/smartimg-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/smartimg-agent.log</string>
+</dict>
+</plist>

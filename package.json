@@ -1,0 +1,21 @@
+{
+  "name": "smartimg",
+  "private": true,
+  "workspaces": [
+    "agent",
+    "server",
+    "shared",
+    "web"
+  ],
+  "scripts": {
+    "dev:api": "bun run --cwd server dev",
+    "dev:web": "bun run --cwd web dev",
+    "test": "bun run --cwd server test && bun run --cwd web test && bun run --cwd agent test",
+    "typecheck": "bun run --cwd server typecheck && bun run --cwd shared typecheck && bun run --cwd web typecheck && bun run --cwd agent typecheck",
+    "check": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "typescript": "^5.6.0"
+  }
+}
