@@ -9,6 +9,7 @@ const EnvSchema = z.object({
   MOCK_CORS_ORIGIN: z.string().trim().default('http://localhost:5173'),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(10_485_760),
   PRESIGN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  MUTABLE_MAX_AGE_SECONDS: z.coerce.number().int().nonnegative().default(60),
 })
 
 export type Config = {
@@ -20,6 +21,8 @@ export type Config = {
   readonly mockCorsOrigin: string
   readonly maxUploadBytes: number
   readonly presignTtlSeconds: number
+  /** Cache lifetime for path-mirrored keys, which get overwritten in place. */
+  readonly mutableMaxAgeSeconds: number
 }
 
 export function loadConfig(
@@ -39,5 +42,6 @@ export function loadConfig(
     mockCorsOrigin: parsed.MOCK_CORS_ORIGIN,
     maxUploadBytes: parsed.MAX_UPLOAD_BYTES,
     presignTtlSeconds: parsed.PRESIGN_TTL_SECONDS,
+    mutableMaxAgeSeconds: parsed.MUTABLE_MAX_AGE_SECONDS,
   }
 }

@@ -29,6 +29,86 @@ bun src/main.ts
 Files are uploaded one at a time, in arrival order. A batch is closed once no
 new files arrive for 2 seconds after the last upload finishes.
 
+## Upload straight from the NAS
+
+`src/nas.ts` takes files that already live on a mounted share, compresses them,
+uploads them, and prints the CDN URL. Nothing is moved or written on the NAS.
+
+```bash
+export IMAGE_API_URL=http://127.0.0.1:8787/api
+export IMAGE_CDN_BASE=http://127.0.0.1:8787/mock-cdn   # or your CloudFront domain
+export IMAGE_API_TOKEN=...                              # only if the server requires it
+
+bun src/nas.ts "/mnt/Public/1.업무보고서/박홍제/monkey.jpg"
+```
+
+Either form of the path works, and both name the same object:
+
+```
+\\192.168.0.200\Public\1.업무보고서\박홍제\monkey.jpg
+/mnt/Public/1.업무보고서/박홍제/monkey.jpg
+```
+
+### The key mirrors the share path
+
+```
+share    directories kept verbatim     name . ext
+public / 1.업무보고서 / 박홍제        / monkey.webp
+```
+
+The share name is lowercased and becomes the first segment; every directory
+below it is kept exactly as the NAS spells it, Korean and spaces included (the
+URL percent-encodes them). The extension comes from the MIME type.
+
+One file, one URL, for good. Drop a new image onto the NAS under the same name,
+re-run the command, and the object is overwritten — the link you already sent
+starts showing the new image. Nothing to re-send, nothing to update.
+
+The cost is that such a key cannot be cached forever, since it no longer names
+one fixed set of bytes. Path-mirrored uploads are stored with
+`Cache-Control: public, max-age=60, must-revalidate` instead of the one-year
+`immutable` used for keys nothing overwrites, so a replacement is visible within
+about a minute. Raise or lower that window with `MUTABLE_MAX_AGE_SECONDS` on the
+server. On a real CloudFront distribution, add an invalidation after upload if
+you need the change to be instant rather than within the TTL.
+
+### Keeping every version instead
+
+`--versioned` appends a short digest of the **source** bytes before the
+extension, making each version its own object:
+
+```
+public/1.업무보고서/박홍제/monkey.637ae5f.webp
+```
+
+Now a replacement mints a new URL and the old one keeps resolving to the image
+it was sent for, so those objects keep the full one-year immutable cache. Use it
+for images that go out in email or print, where a link must not change under the
+recipient. The digest covers the source rather than the compressed output, so
+tuning quality later does not churn URLs.
+
+### Options
+
+| Flag | Effect |
+| --- | --- |
+| `--preset NAME` | print the preset URL (`thumbnail`, `productCard`, `productDetail`, `hero`) instead of the original |
+| `-r`, `--recursive` | descend into directories |
+| `--dry-run` | compress and print the URL without uploading |
+| `--versioned` | add a source digest to the name, so each version is its own permanent URL |
+| `--json` | machine-readable output, including every preset URL and both byte counts |
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SMARTIMG_SHARES` | `/mnt/Public,/mnt/Data,/mnt/fga,/mnt/bi` | mount points to accept, `path=share` to rename |
+| `SMARTIMG_MAX_EDGE` | `2400` | longest edge in pixels; larger images are scaled down |
+| `SMARTIMG_QUALITY` | `82` | encoder quality |
+| `SMARTIMG_KEEP_FORMAT` | unset | set to keep the source format instead of converting to WebP |
+
+Paths outside every configured share are refused, as are `..` segments, so the
+command cannot be pointed at the rest of the filesystem. GIFs are uploaded
+untouched — re-encoding one through a still-image pipeline would drop every
+frame but the first.
+
 ## Install as a launchd service (macOS)
 
 1. Resolve the placeholders in the template (run from the repo root):

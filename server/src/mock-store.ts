@@ -9,6 +9,7 @@ import {
 type MockObject = {
   readonly body: Uint8Array<ArrayBuffer>
   readonly contentType: string
+  readonly cacheControl: string
   readonly lastModified: Date
 }
 
@@ -17,16 +18,25 @@ export class MockStore implements ImageStore {
 
   constructor(private readonly baseUrl: string) {}
 
-  presignPut(key: string, contentType: string): Promise<PresignedUpload> {
+  presignPut(
+    key: string,
+    contentType: string,
+    cacheControl: string = CACHE_CONTROL,
+  ): Promise<PresignedUpload> {
     const encoded = key.split('/').map(encodeURIComponent).join('/')
     return Promise.resolve({
       url: this.baseUrl + '/mock-put/' + encoded,
-      headers: { 'Content-Type': contentType, 'Cache-Control': CACHE_CONTROL },
+      headers: { 'Content-Type': contentType, 'Cache-Control': cacheControl },
     })
   }
 
-  put(key: string, body: Uint8Array<ArrayBuffer>, contentType: string): void {
-    this.objects.set(key, { body, contentType, lastModified: new Date() })
+  put(
+    key: string,
+    body: Uint8Array<ArrayBuffer>,
+    contentType: string,
+    cacheControl: string = CACHE_CONTROL,
+  ): void {
+    this.objects.set(key, { body, contentType, cacheControl, lastModified: new Date() })
   }
 
   read(key: string): MockObject | undefined {

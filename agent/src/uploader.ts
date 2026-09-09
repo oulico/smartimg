@@ -17,6 +17,10 @@ export type UploadRequest = {
   readonly filename: string
   readonly contentType: string
   readonly bytes: Uint8Array
+  /** NAS share path; when set the key mirrors it instead of getting a UUID. */
+  readonly path?: string | undefined
+  /** Hex digest of the *source* bytes, required alongside `path`. */
+  readonly contentHash?: string | undefined
 }
 
 export type UploadedImage = {
@@ -71,12 +75,24 @@ export function createUploader(
       presigned = PresignResponseSchema.parse(
         await client
           .post('images/presign', {
-            json: {
-              filename: request.filename,
-              contentType: request.contentType,
-              size: request.bytes.byteLength,
-              folder: config.folder,
-            },
+            json:
+              request.path === undefined
+                ? {
+                    filename: request.filename,
+                    contentType: request.contentType,
+                    size: request.bytes.byteLength,
+                    folder: config.folder,
+                  }
+                : {
+                    path: request.path,
+                    contentType: request.contentType,
+                    size: request.bytes.byteLength,
+                    // Omitted unless versioning: its absence is what makes the
+                    // key mirror the path and stay overwritable.
+                    ...(request.contentHash === undefined
+                      ? {}
+                      : { contentHash: request.contentHash }),
+                  },
           })
           .json(),
       )

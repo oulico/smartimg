@@ -20,12 +20,16 @@ export function createS3Store(config: Config): ImageStore {
   )
 
   return {
-    async presignPut(key: string, contentType: string): Promise<PresignedUpload> {
+    async presignPut(
+      key: string,
+      contentType: string,
+      cacheControl: string = CACHE_CONTROL,
+    ): Promise<PresignedUpload> {
       const command = new PutObjectCommand({
         Bucket: config.bucket,
         Key: key,
         ContentType: contentType,
-        CacheControl: CACHE_CONTROL,
+        CacheControl: cacheControl,
       })
       const url = await getSignedUrl(client, command, {
         expiresIn: config.presignTtlSeconds,
@@ -33,7 +37,7 @@ export function createS3Store(config: Config): ImageStore {
       })
       return {
         url,
-        headers: { 'Content-Type': contentType, 'Cache-Control': CACHE_CONTROL },
+        headers: { 'Content-Type': contentType, 'Cache-Control': cacheControl },
       }
     },
 

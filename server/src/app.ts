@@ -48,7 +48,7 @@ export function createApp(config: Config): { app: Hono; mockStore: MockStore | n
       if (body.byteLength === 0 || body.byteLength > config.maxUploadBytes) {
         throw new ApiError('invalid_upload', 400, 'request body exceeds the upload size limit')
       }
-      mockStore.put(key, body, contentType)
+      mockStore.put(key, body, contentType, c.req.header('Cache-Control') ?? CACHE_CONTROL)
       const digest = await crypto.subtle.digest('SHA-256', body)
       const etag = [...new Uint8Array(digest)]
         .map((byte) => byte.toString(16).padStart(2, '0'))
@@ -65,7 +65,7 @@ export function createApp(config: Config): { app: Hono; mockStore: MockStore | n
       }
       return c.body(object.body, 200, {
         'Content-Type': object.contentType,
-        'Cache-Control': CACHE_CONTROL,
+        'Cache-Control': object.cacheControl,
       })
     })
   }

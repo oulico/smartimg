@@ -34,9 +34,13 @@ Shoppers / email / admin  --GET /200x200/filters:...------> CloudFront + DIT
 
 Both upload paths share one backend and one set of rules:
 
-- The server generates every object key: `folder/yyyy/mm/uuid-name.ext`.
-  Keys are immutable and collision-safe; the extension comes from the MIME
-  type, never the filename.
+- The server generates every object key. Uploads from the web app get
+  `folder/yyyy/mm/uuid-name.ext`; uploads that name a NAS path get
+  `share/dir/.../name.ext`, mirroring the share. The extension always comes
+  from the MIME type, never the filename.
+- A key nothing overwrites is served `immutable` for a year. A path-mirrored
+  key is meant to follow its file, so it gets a short revalidating cache
+  instead — the two go together and must not be mixed up.
 - Preset URLs are deterministic and canonical. The syntax lives in one
   module (`shared/src/cdn.ts`) so the web app and the local agent build
   identical URLs.
@@ -126,6 +130,30 @@ an optional bearer token; the server performs the S3 presigning and key
 naming. For automatic startup on macOS (launchd) or a Linux NAS (systemd),
 see the templates and setup guide in [agent/README.md](agent/README.md).
 
+## From the NAS
+
+Shares mounted on this host can be uploaded in place, without dropping copies
+into `Inbox`. The object key mirrors the share path, so the URL is derivable
+from where the file lives:
+
+```bash
+bun run --cwd agent src/nas.ts "/mnt/Public/1.업무보고서/박홍제/monkey.jpg"
+```
+
+```
+\\192.168.0.200\Public\1.업무보고서\박홍제\monkey.jpg
+                 -> public/1.업무보고서/박홍제/monkey.webp
+```
+
+One file, one URL: replace the image on the NAS under the same name, re-run,
+and the link you already sent starts serving the new image. Such a key is
+overwritten in place, so it is stored with a short revalidating cache rather
+than the one-year `immutable` used elsewhere. Pass `--versioned` to append a
+source digest instead, giving every version its own permanent URL.
+
+The image is resized to a 2400px longest edge and re-encoded before upload.
+See [agent/README.md](agent/README.md) for the flags and the full rule.
+
 ## API
 
 All routes are under `/api`, authenticated with `Authorization: Bearer
@@ -134,6 +162,7 @@ IMAGE_API_TOKEN`.
 | Method | Route | Body / query | Response |
 | --- | --- | --- | --- |
 | POST | /api/images/presign | filename, contentType, size, folder? | key, method: PUT, url, headers |
+| POST | /api/images/presign | path, contentType, size, contentHash? | key mirroring the NAS path |
 | GET | /api/images | folder?, nextToken? | objects[], folders[], nextToken |
 | DELETE | /api/images/:key | - | 204 |
 
