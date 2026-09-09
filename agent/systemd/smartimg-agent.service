@@ -1,0 +1,19 @@
+[Unit]
+Description=smartimg local folder upload agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT__
+ExecStart=__BUN__ __PROJECT__/agent/src/main.ts
+Environment=IMAGE_API_URL=http://127.0.0.1:8787/api
+Environment=IMAGE_API_TOKEN=__TOKEN__
+Environment=IMAGE_CDN_BASE=http://127.0.0.1:8787/mock-cdn
+Environment=AGENT_ROOT=__HOME__/ImageDrop
+Environment=IMAGE_FOLDER=uploads
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -123,8 +123,8 @@ Each batch produces `Results/batch-<timestamp>-<id>.json` and `.md`:
 
 The agent never stores AWS credentials. It only talks to the image API with
 an optional bearer token; the server performs the S3 presigning and key
-naming. For automatic startup on macOS, see the launchd template and setup
-guide in [agent/README.md](agent/README.md).
+naming. For automatic startup on macOS (launchd) or a Linux NAS (systemd),
+see the templates and setup guide in [agent/README.md](agent/README.md).
 
 ## API
 
