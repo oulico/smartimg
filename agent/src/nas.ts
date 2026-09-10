@@ -125,7 +125,8 @@ export type NasRunOptions = {
   readonly compress: CompressOptions
   readonly recursive: boolean
   readonly dryRun: boolean
-  /** Append a digest so each version is its own immutable object. */
+  /** Store under a digest of the uploaded bytes, so each version is its own
+   *  immutable object. */
   readonly versioned: boolean
 }
 
@@ -194,12 +195,6 @@ async function uploadOne(
     return { status: 'skipped', source: file, reason: 'not a supported image' }
   }
 
-  // Only computed when versioning is asked for. It covers the source rather
-  // than the compressed output, so tuning quality later does not churn URLs.
-  const contentHash = options.versioned
-    ? createHash('sha256').update(source).digest('hex')
-    : undefined
-
   let compressed: Awaited<ReturnType<typeof compressImage>>
   try {
     compressed = await compressImage(sourceBytes, mime, options.compress)
@@ -210,8 +205,17 @@ async function uploadOne(
     throw error
   }
 
+  // Only computed when versioning is asked for, and over the compressed output
+  // rather than the source. Hashing the source would keep the URL stable across
+  // a change of quality setting, which sounds like a feature until you notice it
+  // means two different images sharing one key that is served with a year of
+  // immutable caching. A versioned URL has to name the bytes behind it.
+  const contentHash = options.versioned
+    ? createHash('sha256').update(compressed.bytes).digest('hex')
+    : undefined
+
   if (options.dryRun) {
-    const key = predictKey(sharePath, contentHash, compressed.contentType)
+    const key = predictKey(sharePath, contentHash)
     return {
       status: 'uploaded',
       source: file,
@@ -250,28 +254,18 @@ async function uploadOne(
   }
 }
 
-const MIME_EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/avif': 'avif',
-  'image/gif': 'gif',
-}
+// Both must match buildPathObjectKey in server/src/keys.ts; the tests below and
+// in server/test/path-keys.test.ts assert the same examples on both sides.
+const VERSION_PREFIX = '_v'
+const HASH_LENGTH = 7
 
 /** Mirrors the server's rule so --dry-run can show the real URL without a call. */
-export function predictKey(
-  sharePath: string,
-  contentHash: string | undefined,
-  contentType: string,
-): string {
+export function predictKey(sharePath: string, contentHash: string | undefined): string {
   const segments = sharePath.split('/').filter((segment) => segment !== '')
-  const filename = segments[segments.length - 1] ?? ''
-  const stem = filename.replace(/\.[^.]*$/, '') || 'image'
-  const extension = MIME_EXTENSION[contentType] ?? 'bin'
   const share = (segments[0] ?? '').toLowerCase()
-  const middle = segments.slice(1, -1)
-  const suffix = contentHash === undefined ? '' : '.' + contentHash.slice(0, 7)
-  return [share, ...middle, stem + suffix + '.' + extension].join('/')
+  const path = [share, ...segments.slice(1)]
+  if (contentHash === undefined) return path.join('/')
+  return [VERSION_PREFIX, contentHash.slice(0, HASH_LENGTH), ...path].join('/')
 }
 
 // ---------------------------------------------------------------- entry point
@@ -333,14 +327,14 @@ const USAGE = `smartimg nas — compress a NAS image and upload it, then print i
   --preset NAME   print the preset URL instead of the original (${Object.keys(IMAGE_PRESETS).join(', ')})
   -r, --recursive descend into directories
   --dry-run       compress and show the URL without uploading
-  --versioned     add a content digest to the name, so each version is its own
+  --versioned     store under _v/{digest}/, so each version is its own
                   immutable object and old links keep resolving
   --json          machine-readable output
 
   env: IMAGE_API_URL, IMAGE_CDN_BASE, IMAGE_API_TOKEN,
        SMARTIMG_SHARES (default ${DEFAULT_SHARE_MOUNTS}),
        SMARTIMG_MAX_EDGE (${DEFAULT_COMPRESS.maxEdge}), SMARTIMG_QUALITY (${DEFAULT_COMPRESS.quality}),
-       SMARTIMG_KEEP_FORMAT (set to keep the source format instead of WebP)
+       SMARTIMG_TO_WEBP (set to 'true' to store WebP instead of the source format)
 `
 
 export async function main(argv: readonly string[], env: NodeJS.ProcessEnv): Promise<number> {
@@ -372,7 +366,7 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv): Pro
     compress: {
       maxEdge: Number(env['SMARTIMG_MAX_EDGE'] ?? DEFAULT_COMPRESS.maxEdge),
       quality: Number(env['SMARTIMG_QUALITY'] ?? DEFAULT_COMPRESS.quality),
-      toWebp: env['SMARTIMG_KEEP_FORMAT'] === undefined,
+      toWebp: env['SMARTIMG_TO_WEBP'] === 'true',
     },
     recursive: flags.recursive,
     dryRun: flags.dryRun,

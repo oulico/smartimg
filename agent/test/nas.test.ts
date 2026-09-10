@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto'
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { compressImage } from '../src/compress'
 import {
@@ -8,6 +12,7 @@ import {
   predictKey,
   toLocalPath,
   toSharePath,
+  uploadNasPaths,
 } from '../src/nas'
 
 const MOUNTS = parseShareMounts(DEFAULT_SHARE_MOUNTS)
@@ -65,15 +70,87 @@ describe('toLocalPath', () => {
 
 describe('predictKey', () => {
   it('agrees with the server rule so --dry-run shows the real URL', () => {
-    expect(predictKey('smartimg/1.업무보고서/박홍제/monkey.jpg', undefined, 'image/webp')).toBe(
-      'smartimg/1.업무보고서/박홍제/monkey.webp',
+    expect(predictKey('smartimg/1.업무보고서/박홍제/monkey.jpg', undefined)).toBe(
+      'smartimg/1.업무보고서/박홍제/monkey.jpg',
     )
   })
 
-  it('adds the digest when versioning', () => {
-    expect(predictKey('smartimg/1.업무보고서/박홍제/monkey.jpg', '9f3a2c1dead', 'image/webp')).toBe(
-      'smartimg/1.업무보고서/박홍제/monkey.9f3a2c1.webp',
+  it('puts a versioned object under the same prefix the server uses', () => {
+    expect(predictKey('smartimg/1.업무보고서/박홍제/monkey.jpg', '9f3a2c1dead')).toBe(
+      '_v/9f3a2c1/smartimg/1.업무보고서/박홍제/monkey.jpg',
     )
+  })
+
+  it('keeps sources that differ only by extension apart', () => {
+    expect(predictKey('smartimg/김치.jpg', undefined)).not.toBe(
+      predictKey('smartimg/김치.png', undefined),
+    )
+  })
+})
+
+/**
+ * A versioned key is served with a year of immutable caching, so it has to name
+ * the bytes stored under it. The digest therefore covers the compressed output,
+ * not the source file: hashing the source would keep one URL across a change of
+ * quality setting and quietly park two different images on it.
+ */
+describe('a versioned key names the bytes it holds', () => {
+  async function noisyJpeg(): Promise<Uint8Array> {
+    const sharp = (await import('sharp')).default
+    const pixels = Buffer.alloc(64 * 64 * 3)
+    for (let i = 0; i < pixels.length; i++) pixels[i] = (i * 37 + (i % 11) * 91) % 256
+    const buffer = await sharp(pixels, { raw: { width: 64, height: 64, channels: 3 } })
+      .jpeg({ quality: 100 })
+      .toBuffer()
+    return new Uint8Array(buffer)
+  }
+
+  async function keyFor(source: Uint8Array, quality: number): Promise<string> {
+    const compressed = await compressImage(source, 'image/jpeg', {
+      maxEdge: 2400,
+      quality,
+      toWebp: false,
+    })
+    const digest = createHash('sha256').update(compressed.bytes).digest('hex')
+    return predictKey('smartimg/사진/monkey.jpg', digest)
+  }
+
+  it('moves to a new URL when the compression setting changes the stored bytes', async () => {
+    const source = await noisyJpeg()
+    expect(await keyFor(source, 40)).not.toBe(await keyFor(source, 90))
+  })
+
+  it('stays on one URL while the source and the settings are unchanged', async () => {
+    const source = await noisyJpeg()
+    expect(await keyFor(source, 82)).toBe(await keyFor(source, 82))
+  })
+
+  // Through the real code path, so it holds uploadNasPaths to the same rule and
+  // not just the hashing helper above.
+  it('is what --dry-run predicts for the same file at two qualities', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'smartimg-version-'))
+    await writeFile(join(root, 'monkey.jpg'), await noisyJpeg())
+    const mounts = parseShareMounts(root + '=smartimg')
+
+    async function run(quality: number): Promise<string> {
+      const [outcome] = await uploadNasPaths([join(root, 'monkey.jpg')], {
+        apiBaseUrl: 'http://127.0.0.1:1/api',
+        apiToken: undefined,
+        cdnBase: 'https://cdn.example.com',
+        mounts,
+        compress: { maxEdge: 2400, quality, toWebp: false },
+        recursive: false,
+        dryRun: true,
+        versioned: true,
+      })
+      expect(outcome?.status).toBe('uploaded')
+      return outcome?.status === 'uploaded' ? outcome.key : ''
+    }
+
+    const lean = await run(40)
+    const rich = await run(90)
+    expect(lean).toMatch(/^_v\/[0-9a-f]{7}\/smartimg\/monkey\.jpg$/)
+    expect(rich).not.toBe(lean)
   })
 })
 

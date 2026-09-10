@@ -117,6 +117,19 @@ const TRANSFORM_LOOKALIKE = /^(?:\d+x\d+|fit-in|filters:.*|trim|meta)$/
 export const MAX_PATH_SEGMENTS = 16
 const HASH_LENGTH = 7
 
+/**
+ * Versioned objects live under this prefix instead of carrying the digest in
+ * the filename. A digest spliced into the name (photo.9f3a2c1.jpg) is a key a
+ * plain upload could also produce, from a source file that happens to be named
+ * that way — rare, but the whole point of a versioned key is that nothing else
+ * can ever land on it. Refusing such filenames would be the other way out, and
+ * a worse one: it would reject a real file on the share to prevent a collision
+ * that needs a 1-in-268-million digest match to happen at all. A reserved first
+ * segment costs one unusable share name instead, and shares are few and chosen
+ * by whoever sets the sync up.
+ */
+export const VERSION_PREFIX = '_v'
+
 export function normalizeSourcePath(input: string): readonly string[] {
   const segments = input
     .replace(/\\/g, '/')
@@ -151,6 +164,13 @@ export function normalizeSourcePath(input: string): readonly string[] {
   if (TRANSFORM_LOOKALIKE.test(share)) {
     throw new ApiError('invalid_upload', 400, 'share name must not look like a transform directive')
   }
+  if (share === VERSION_PREFIX) {
+    throw new ApiError(
+      'invalid_upload',
+      400,
+      'share name ' + VERSION_PREFIX + ' is reserved for versioned objects',
+    )
+  }
   return [share, ...segments.slice(1)]
 }
 
@@ -158,35 +178,63 @@ export type PathObjectKeyInput = {
   readonly path: string
   readonly contentType: string
   /**
-   * Omit to mirror the path exactly, so the same source file always lands on
-   * the same key and a replacement overwrites it — one permanent URL per file,
-   * whose content follows the file. Supply it to append a short digest instead,
-   * which makes each version its own immutable object.
+   * Digest of the bytes that are about to be stored — not of the source file
+   * they were derived from. Omit it to mirror the path exactly, so the same
+   * source file always lands on the same key and a replacement overwrites it —
+   * one permanent URL per file, whose content follows the file. Supply it to
+   * place the object under its own version prefix instead, which makes each
+   * version its own immutable object.
    */
   readonly contentHash?: string | undefined
 }
 
 /**
- * Builds a key that mirrors the source share path: share/dir/.../name.{ext}
+ * Builds a key that is the source share path, verbatim:
+ *
+ *   김치.jpg -> share/김치.jpg
+ *   김치.png -> share/김치.png
+ *
+ * The filename is carried across untouched, extension included. Deriving the
+ * extension from the MIME type instead would map every 김치.* in a folder onto
+ * one 김치.webp and let the last upload silently win, so the rule stays "the
+ * path, exactly": distinct source files cannot help but get distinct keys, and
+ * the URL is readable straight off the share.
+ *
+ * That only holds while the stored bytes keep the source format — see
+ * compressImage, which re-encodes in place rather than converting. Delivery is
+ * a separate matter: CloudFront negotiates WebP through the preset filters.
+ *
  * The same source file therefore always lands on the same key, and replacing
  * it overwrites the object in place, so one link keeps pointing at whatever
  * that file currently is. Such a key is not immutable and must not be served
  * with a one-year cache — see mutableCacheControl in store.ts.
  *
- * With a contentHash the digest goes before the extension instead, making each
- * version its own object that can keep the immutable cache.
+ * With a contentHash the whole path moves under _v/{digest}/, making each
+ * version its own object that can keep the immutable cache:
+ *
+ *   share/김치.jpg + 9f3a2c1... -> _v/9f3a2c1/share/김치.jpg
+ *
+ * The digest must cover the stored bytes. Hashing the source instead would let
+ * two different objects — the same photo recompressed at another quality —
+ * share one key that is served with a year of immutable caching, which is the
+ * one thing a versioned key exists to rule out.
  */
 export function buildPathObjectKey(input: PathObjectKeyInput): string {
-  const extension = extensionForMime(input.contentType)
+  // The extension is not taken from the MIME type here, but the type is still
+  // checked: only real image types may be signed for upload.
+  if (!isAllowedImageMime(input.contentType)) {
+    throw new ApiError(
+      'invalid_upload',
+      400,
+      'contentType must be one of ' + ALLOWED_MIME_TYPES.join(', '),
+    )
+  }
   if (input.contentHash !== undefined && !/^[0-9a-f]{7,64}$/.test(input.contentHash)) {
     throw new ApiError('invalid_upload', 400, 'contentHash must be 7-64 lowercase hex characters')
   }
   const segments = normalizeSourcePath(input.path)
-  const filename = segments[segments.length - 1] ?? ''
-  const stem = filename.replace(/\.[^.]*$/, '') || 'image'
-  const suffix =
-    input.contentHash === undefined ? '' : '.' + input.contentHash.slice(0, HASH_LENGTH)
-  return [...segments.slice(0, -1), stem + suffix + '.' + extension].join('/')
+  if (input.contentHash === undefined) return segments.join('/')
+  return [VERSION_PREFIX, input.contentHash.slice(0, HASH_LENGTH), ...segments].join('/')
 }
 
 /**

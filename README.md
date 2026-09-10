@@ -45,7 +45,8 @@ Both upload paths share one backend and one set of rules:
   module (`shared/src/cdn.ts`) so the web app and the local agent build
   identical URLs.
 - The API authenticates with a bearer token; clients never touch AWS
-  credentials.
+  credentials. `IMAGE_API_TOKEN` is mandatory unless `MOCK_S3=true`: the server
+  refuses to start without it rather than serving a real bucket unauthenticated.
 
 ## Quickstart (mock mode, no AWS needed)
 
@@ -142,14 +143,15 @@ bun run --cwd agent src/nas.ts "/mnt/smartimg/1.업무보고서/박홍제/monkey
 
 ```
 \\192.168.0.200\smartimg\1.업무보고서\박홍제\monkey.jpg
-                 -> smartimg/1.업무보고서/박홍제/monkey.webp
+                 -> smartimg/1.업무보고서/박홍제/monkey.jpg
 ```
 
 One file, one URL: replace the image on the NAS under the same name, re-run,
 and the link you already sent starts serving the new image. Such a key is
 overwritten in place, so it is stored with a short revalidating cache rather
-than the one-year `immutable` used elsewhere. Pass `--versioned` to append a
-source digest instead, giving every version its own permanent URL.
+than the one-year `immutable` used elsewhere. Pass `--versioned` to store the
+object under `_v/{digest}/` instead, where the digest covers the uploaded bytes,
+giving every version its own permanent URL.
 
 The image is resized to a 2400px longest edge and re-encoded before upload.
 See [agent/README.md](agent/README.md) for the flags and the full rule.

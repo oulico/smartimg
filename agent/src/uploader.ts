@@ -19,7 +19,8 @@ export type UploadRequest = {
   readonly bytes: Uint8Array
   /** NAS share path; when set the key mirrors it instead of getting a UUID. */
   readonly path?: string | undefined
-  /** Hex digest of the *source* bytes, required alongside `path`. */
+  /** Hex digest of the bytes in `bytes` — what is stored, not what it came
+   *  from. Only meaningful alongside `path`. */
   readonly contentHash?: string | undefined
 }
 

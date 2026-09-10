@@ -46,33 +46,77 @@ describe('normalizeSourcePath', () => {
 })
 
 describe('buildPathObjectKey', () => {
-  it('mirrors the share path exactly when no hash is given', () => {
+  it('is the share path, verbatim', () => {
     const key = buildPathObjectKey({
       path: 'Public/1.업무보고서/박홍제/monkey.jpg',
-      contentType: 'image/webp',
+      contentType: 'image/jpeg',
     })
-    expect(key).toBe('public/1.업무보고서/박홍제/monkey.webp')
+    expect(key).toBe('public/1.업무보고서/박홍제/monkey.jpg')
+  })
+
+  it('keeps two source files that differ only by extension apart', () => {
+    const jpg = buildPathObjectKey({ path: 'smartimg/김치.jpg', contentType: 'image/jpeg' })
+    const png = buildPathObjectKey({ path: 'smartimg/김치.png', contentType: 'image/png' })
+    expect(jpg).toBe('smartimg/김치.jpg')
+    expect(png).toBe('smartimg/김치.png')
+    expect(jpg).not.toBe(png)
+  })
+
+  it('maps distinct source paths to distinct keys', () => {
+    const paths = [
+      'smartimg/김치.jpg',
+      'smartimg/김치.png',
+      'smartimg/김치.webp',
+      'smartimg/김치.jpg.webp',
+      'smartimg/김치',
+      'smartimg/사진/김치.jpg',
+    ]
+    const keys = paths.map((path) => buildPathObjectKey({ path, contentType: 'image/jpeg' }))
+    expect(new Set(keys).size).toBe(paths.length)
+  })
+
+  it('refuses a contentType that is not an image', () => {
+    expect(() =>
+      buildPathObjectKey({ path: 'smartimg/김치.jpg', contentType: 'text/html' }),
+    ).toThrow(ApiError)
   })
 
   it('gives one stable key per file, so a replacement overwrites it', () => {
-    const before = buildPathObjectKey({
-      path: 'Public/a/b.jpg',
-      contentType: 'image/webp',
-    })
-    const after = buildPathObjectKey({
-      path: 'Public/a/b.jpg',
-      contentType: 'image/webp',
-    })
+    const before = buildPathObjectKey({ path: 'Public/a/b.jpg', contentType: 'image/jpeg' })
+    const after = buildPathObjectKey({ path: 'Public/a/b.jpg', contentType: 'image/jpeg' })
     expect(after).toBe(before)
   })
 
-  it('appends a short source hash when versioning is asked for', () => {
+  it('puts a versioned object under its own prefix, path and name intact', () => {
     const key = buildPathObjectKey({
       path: 'Public/1.업무보고서/박홍제/monkey.jpg',
-      contentType: 'image/webp',
+      contentType: 'image/jpeg',
       contentHash: HASH,
     })
-    expect(key).toBe('public/1.업무보고서/박홍제/monkey.9f3a2c1.webp')
+    expect(key).toBe('_v/9f3a2c1/public/1.업무보고서/박홍제/monkey.jpg')
+  })
+
+  // The old rule spliced the digest into the filename, which meant an ordinary
+  // upload of a file named that way landed on a versioned object's key and
+  // overwrote bytes that a year of immutable caching had already been promised.
+  it('cannot be reached by a plain upload, whatever the source file is named', () => {
+    const versioned = buildPathObjectKey({
+      path: 'Public/a/b.jpg',
+      contentType: 'image/jpeg',
+      contentHash: HASH,
+    })
+    const lookalike = buildPathObjectKey({
+      path: 'Public/a/b.9f3a2c1.jpg',
+      contentType: 'image/jpeg',
+    })
+    expect(lookalike).not.toBe(versioned)
+    expect(versioned.startsWith('_v/')).toBe(true)
+  })
+
+  it('refuses a share that would sit where versioned objects live', () => {
+    expect(() =>
+      buildPathObjectKey({ path: '_v/9f3a2c1/anything.jpg', contentType: 'image/jpeg' }),
+    ).toThrow(ApiError)
   })
 
   it('is stable: the same path and source bytes always give the same key', () => {
@@ -101,11 +145,12 @@ describe('buildPathObjectKey', () => {
       contentHash: 'deadbee' + HASH.slice(7),
     })
     expect(after).not.toBe(before)
+    expect(before).toBe('_v/9f3a2c1/public/a/b.jpg')
   })
 
-  it('takes the extension from the MIME type, never the filename', () => {
+  it('carries an unusual filename across untouched', () => {
     const key = buildPathObjectKey({ path: 'Public/a/photo.jpeg.txt', contentType: 'image/png' })
-    expect(key).toBe('public/a/photo.jpeg.png')
+    expect(key).toBe('public/a/photo.jpeg.txt')
   })
 
   it('refuses a hash that is not hex', () => {

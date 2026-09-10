@@ -52,13 +52,17 @@ Either form of the path works, and both name the same object:
 ### The key mirrors the share path
 
 ```
-share    directories kept verbatim     name . ext
-smartimg / 1.업무보고서 / 박홍제      / monkey.webp
+share    directories kept verbatim     filename verbatim
+smartimg / 1.업무보고서 / 박홍제      / monkey.jpg
 ```
 
 The share name is lowercased and becomes the first segment; every directory
 below it is kept exactly as the NAS spells it, Korean and spaces included (the
-URL percent-encodes them). The extension comes from the MIME type.
+URL percent-encodes them). The filename carries across untouched, extension
+included — it is *not* derived from the MIME type, because that would map
+monkey.jpg and monkey.png onto one key and let the last upload silently win.
+Compression re-encodes in the source format for the same reason; WebP is
+negotiated at the edge through the preset URLs instead.
 
 One file, one URL, for good. Drop a new image onto the NAS under the same name,
 re-run the command, and the object is overwritten — the link you already sent
@@ -74,18 +78,27 @@ you need the change to be instant rather than within the TTL.
 
 ### Keeping every version instead
 
-`--versioned` appends a short digest of the **source** bytes before the
-extension, making each version its own object:
+`--versioned` puts the object under a digest of the **stored** bytes, keeping
+the share path intact beneath it:
 
 ```
-smartimg/1.업무보고서/박홍제/monkey.637ae5f.webp
+_v/637ae5f/smartimg/1.업무보고서/박홍제/monkey.jpg
 ```
 
 Now a replacement mints a new URL and the old one keeps resolving to the image
 it was sent for, so those objects keep the full one-year immutable cache. Use it
 for images that go out in email or print, where a link must not change under the
-recipient. The digest covers the source rather than the compressed output, so
-tuning quality later does not churn URLs.
+recipient.
+
+The digest covers what is actually stored, not the source file it came from.
+Hashing the source would hold the URL steady across a change of `SMARTIMG_QUALITY`
+— convenient, except that it would put two different images on one URL that has
+already been promised a year of immutable caching, which is the single thing a
+versioned link exists to prevent. Change a compression setting and previously
+uploaded files simply get new versioned URLs; the old ones keep working.
+
+`_v` is reserved as a share name for this reason, so nothing published from the
+NAS can ever land on a versioned object's key.
 
 ### Options
 
@@ -94,7 +107,7 @@ tuning quality later does not churn URLs.
 | `--preset NAME` | print the preset URL (`thumbnail`, `productCard`, `productDetail`, `hero`) instead of the original |
 | `-r`, `--recursive` | descend into directories |
 | `--dry-run` | compress and print the URL without uploading |
-| `--versioned` | add a source digest to the name, so each version is its own permanent URL |
+| `--versioned` | store under a digest of the uploaded bytes, so each version is its own permanent URL |
 | `--json` | machine-readable output, including every preset URL and both byte counts |
 
 | Variable | Default | Meaning |

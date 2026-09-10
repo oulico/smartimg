@@ -5,14 +5,19 @@ export type CompressOptions = {
   /** Longest edge, in pixels. Larger images are scaled down; smaller ones are left alone. */
   readonly maxEdge: number
   readonly quality: number
-  /** Re-encode to WebP instead of keeping the source format. */
+  /**
+   * Re-encode to WebP instead of keeping the source format. Off by default:
+   * the object key is the source path verbatim, so changing the format would
+   * leave a .jpg URL serving WebP bytes. Delivery is converted anyway — the
+   * preset URLs negotiate WebP at the edge.
+   */
   readonly toWebp: boolean
 }
 
 export const DEFAULT_COMPRESS: CompressOptions = {
   maxEdge: 2400,
   quality: 82,
-  toWebp: true,
+  toWebp: false,
 }
 
 export type CompressedImage = {

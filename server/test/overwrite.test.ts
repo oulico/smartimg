@@ -93,7 +93,7 @@ describe('a path-mirrored key follows the source file', () => {
       contentHash: 'deadbee',
       size: 32,
     })
-    expect(presigned.key).toBe('public/1.업무보고서/박홍제/monkey.deadbee.png')
+    expect(presigned.key).toBe('_v/deadbee/public/1.업무보고서/박홍제/monkey.png')
     expect(presigned.headers['Cache-Control']).toBe('public, max-age=31536000, immutable')
   })
 
