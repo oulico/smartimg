@@ -1,20 +1,22 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { buildImageUrl, IMAGE_PRESETS, type ImagePreset } from '@smartimg/shared'
+import { buildImageUrl, type ImagePreset } from '@smartimg/shared'
 import { hasErrnoCode } from './errno'
 
-export type UploadResult =
-  | {
-      readonly status: 'uploaded'
-      readonly source: string
-      readonly key: string
-      readonly url: string
-    }
-  | {
-      readonly status: 'failed'
-      readonly source: string
-      readonly error: string
-    }
+type UploadedResult = {
+  readonly status: 'uploaded'
+  readonly source: string
+  readonly key: string
+  readonly url: string
+}
+
+type FailedResult = {
+  readonly status: 'failed'
+  readonly source: string
+  readonly error: string
+}
+
+export type UploadResult = UploadedResult | FailedResult
 
 export type Batch = {
   readonly id: string
@@ -51,32 +53,25 @@ async function writeExclusive(path: string, contents: string): Promise<boolean> 
   }
 }
 
-type JsonEntry = {
-  readonly status: string
-  readonly source: string
-  readonly key?: string
-  readonly url?: string
-  readonly presets?: Readonly<Record<string, string>>
-  readonly error?: string
-}
+type JsonEntry =
+  | (UploadedResult & { readonly presets: Readonly<Record<ImagePreset, string>> })
+  | FailedResult
 
 function toJsonEntry(result: UploadResult, cdnBase: string): JsonEntry {
   switch (result.status) {
     case 'uploaded': {
-      const presets: Record<string, string> = {}
-      for (const preset of PRESET_IDS) {
-        presets[preset] = buildImageUrl(cdnBase, result.key, { preset })
-      }
       return {
-        status: result.status,
-        source: result.source,
-        key: result.key,
-        url: result.url,
-        presets,
+        ...result,
+        presets: {
+          thumbnail: buildImageUrl(cdnBase, result.key, { preset: 'thumbnail' }),
+          productCard: buildImageUrl(cdnBase, result.key, { preset: 'productCard' }),
+          productDetail: buildImageUrl(cdnBase, result.key, { preset: 'productDetail' }),
+          hero: buildImageUrl(cdnBase, result.key, { preset: 'hero' }),
+        },
       }
     }
     case 'failed':
-      return { status: result.status, source: result.source, error: result.error }
+      return result
     default:
       return assertNever(result)
   }
@@ -88,10 +83,10 @@ function markdownFor(batch: Batch, entries: readonly JsonEntry[]): string {
     if (entry.status !== 'uploaded') {
       continue
     }
-    lines.push('- ' + entry.source + ' -> ' + (entry.key ?? ''))
-    lines.push('  - original: ' + (entry.url ?? ''))
+    lines.push('- ' + entry.source + ' -> ' + entry.key)
+    lines.push('  - original: ' + entry.url)
     for (const preset of PRESET_IDS) {
-      lines.push('  - ' + preset + ': ' + (entry.presets?.[preset] ?? ''))
+      lines.push('  - ' + preset + ': ' + entry.presets[preset])
     }
   }
   lines.push('', '## Failed', '')
@@ -99,7 +94,7 @@ function markdownFor(batch: Batch, entries: readonly JsonEntry[]): string {
     if (entry.status !== 'failed') {
       continue
     }
-    lines.push('- ' + entry.source + ': ' + (entry.error ?? ''))
+    lines.push('- ' + entry.source + ': ' + entry.error)
   }
   return lines.join('\n') + '\n'
 }
