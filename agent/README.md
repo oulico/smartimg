@@ -39,21 +39,21 @@ export IMAGE_API_URL=http://127.0.0.1:8787/api
 export IMAGE_CDN_BASE=http://127.0.0.1:8787/mock-cdn   # or your CloudFront domain
 export IMAGE_API_TOKEN=...                              # only if the server requires it
 
-bun src/nas.ts "/mnt/Public/1.업무보고서/박홍제/monkey.jpg"
+bun src/nas.ts "/mnt/smartimg/1.업무보고서/박홍제/monkey.jpg"
 ```
 
 Either form of the path works, and both name the same object:
 
 ```
-\\192.168.0.200\Public\1.업무보고서\박홍제\monkey.jpg
-/mnt/Public/1.업무보고서/박홍제/monkey.jpg
+\\192.168.0.200\smartimg\1.업무보고서\박홍제\monkey.jpg
+/mnt/smartimg/1.업무보고서/박홍제/monkey.jpg
 ```
 
 ### The key mirrors the share path
 
 ```
 share    directories kept verbatim     name . ext
-public / 1.업무보고서 / 박홍제        / monkey.webp
+smartimg / 1.업무보고서 / 박홍제      / monkey.webp
 ```
 
 The share name is lowercased and becomes the first segment; every directory
@@ -78,7 +78,7 @@ you need the change to be instant rather than within the TTL.
 extension, making each version its own object:
 
 ```
-public/1.업무보고서/박홍제/monkey.637ae5f.webp
+smartimg/1.업무보고서/박홍제/monkey.637ae5f.webp
 ```
 
 Now a replacement mints a new URL and the old one keeps resolving to the image
@@ -99,7 +99,7 @@ tuning quality later does not churn URLs.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SMARTIMG_SHARES` | `/mnt/Public,/mnt/Data,/mnt/fga,/mnt/bi` | mount points to accept, `path=share` to rename |
+| `SMARTIMG_SHARES` | `/mnt/smartimg` | mount points to accept, `path=share` to rename |
 | `SMARTIMG_MAX_EDGE` | `2400` | longest edge in pixels; larger images are scaled down |
 | `SMARTIMG_QUALITY` | `82` | encoder quality |
 | `SMARTIMG_KEEP_FORMAT` | unset | set to keep the source format instead of converting to WebP |

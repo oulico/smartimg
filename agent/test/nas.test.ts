@@ -14,15 +14,15 @@ const MOUNTS = parseShareMounts(DEFAULT_SHARE_MOUNTS)
 
 describe('toSharePath', () => {
   it('maps a mounted path to its share', () => {
-    expect(toSharePath('/mnt/Public/1.업무보고서/박홍제/monkey.jpg', MOUNTS)).toBe(
-      'public/1.업무보고서/박홍제/monkey.jpg',
+    expect(toSharePath('/mnt/smartimg/1.업무보고서/박홍제/monkey.jpg', MOUNTS)).toBe(
+      'smartimg/1.업무보고서/박홍제/monkey.jpg',
     )
   })
 
   it('maps the UNC path people paste from Windows to the same share path', () => {
-    const unc = '\\\\192.168.0.200\\Public\\1.업무보고서\\박홍제\\monkey.jpg'
+    const unc = '\\\\192.168.0.200\\smartimg\\1.업무보고서\\박홍제\\monkey.jpg'
     expect(toSharePath(unc, MOUNTS)).toBe(
-      toSharePath('/mnt/Public/1.업무보고서/박홍제/monkey.jpg', MOUNTS),
+      toSharePath('/mnt/smartimg/1.업무보고서/박홍제/monkey.jpg', MOUNTS),
     )
   })
 
@@ -30,25 +30,32 @@ describe('toSharePath', () => {
     expect(() => toSharePath('/home/hj/secret.png', MOUNTS)).toThrow(NasPathError)
   })
 
+  it('refuses the other NAS shares, which are not for publishing', () => {
+    expect(() => toSharePath('/mnt/Public/1.업무보고서/박홍제/monkey.jpg', MOUNTS)).toThrow(
+      NasPathError,
+    )
+    expect(() => toSharePath('/mnt/fga/03_법인/a.png', MOUNTS)).toThrow(NasPathError)
+  })
+
   it('refuses traversal that escapes the mount', () => {
-    expect(() => toSharePath('/mnt/Public/../../etc/passwd', MOUNTS)).toThrow(NasPathError)
+    expect(() => toSharePath('/mnt/smartimg/../../etc/passwd', MOUNTS)).toThrow(NasPathError)
   })
 
   it('honours an explicit share name override', () => {
-    const mounts = parseShareMounts('/mnt/fga=archive')
-    expect(toSharePath('/mnt/fga/03_법인/a.png', mounts)).toBe('archive/03_법인/a.png')
+    const mounts = parseShareMounts('/mnt/smartimg=archive')
+    expect(toSharePath('/mnt/smartimg/03_법인/a.png', mounts)).toBe('archive/03_법인/a.png')
   })
 })
 
 describe('toLocalPath', () => {
   it('translates a UNC path to the mount this host can actually read', () => {
-    expect(toLocalPath('\\\\192.168.0.200\\Public\\1.업무보고서\\박홍제\\monkey.jpg', MOUNTS)).toBe(
-      '/mnt/Public/1.업무보고서/박홍제/monkey.jpg',
-    )
+    expect(
+      toLocalPath('\\\\192.168.0.200\\smartimg\\1.업무보고서\\박홍제\\monkey.jpg', MOUNTS),
+    ).toBe('/mnt/smartimg/1.업무보고서/박홍제/monkey.jpg')
   })
 
   it('leaves an ordinary local path alone', () => {
-    expect(toLocalPath('/mnt/Public/a.jpg', MOUNTS)).toBe('/mnt/Public/a.jpg')
+    expect(toLocalPath('/mnt/smartimg/a.jpg', MOUNTS)).toBe('/mnt/smartimg/a.jpg')
   })
 
   it('refuses a share that is not mounted here', () => {
@@ -58,22 +65,22 @@ describe('toLocalPath', () => {
 
 describe('predictKey', () => {
   it('agrees with the server rule so --dry-run shows the real URL', () => {
-    expect(predictKey('public/1.업무보고서/박홍제/monkey.jpg', undefined, 'image/webp')).toBe(
-      'public/1.업무보고서/박홍제/monkey.webp',
+    expect(predictKey('smartimg/1.업무보고서/박홍제/monkey.jpg', undefined, 'image/webp')).toBe(
+      'smartimg/1.업무보고서/박홍제/monkey.webp',
     )
   })
 
   it('adds the digest when versioning', () => {
-    expect(predictKey('public/1.업무보고서/박홍제/monkey.jpg', '9f3a2c1dead', 'image/webp')).toBe(
-      'public/1.업무보고서/박홍제/monkey.9f3a2c1.webp',
+    expect(predictKey('smartimg/1.업무보고서/박홍제/monkey.jpg', '9f3a2c1dead', 'image/webp')).toBe(
+      'smartimg/1.업무보고서/박홍제/monkey.9f3a2c1.webp',
     )
   })
 })
 
 describe('parseArgs', () => {
   it('collects targets and flags', () => {
-    const flags = parseArgs(['/mnt/Public/a.jpg', '--preset', 'thumbnail', '-r', '--json'])
-    expect(flags.targets).toEqual(['/mnt/Public/a.jpg'])
+    const flags = parseArgs(['/mnt/smartimg/a.jpg', '--preset', 'thumbnail', '-r', '--json'])
+    expect(flags.targets).toEqual(['/mnt/smartimg/a.jpg'])
     expect(flags.preset).toBe('thumbnail')
     expect(flags.recursive).toBe(true)
     expect(flags.json).toBe(true)

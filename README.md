@@ -137,12 +137,12 @@ into `Inbox`. The object key mirrors the share path, so the URL is derivable
 from where the file lives:
 
 ```bash
-bun run --cwd agent src/nas.ts "/mnt/Public/1.업무보고서/박홍제/monkey.jpg"
+bun run --cwd agent src/nas.ts "/mnt/smartimg/1.업무보고서/박홍제/monkey.jpg"
 ```
 
 ```
-\\192.168.0.200\Public\1.업무보고서\박홍제\monkey.jpg
-                 -> public/1.업무보고서/박홍제/monkey.webp
+\\192.168.0.200\smartimg\1.업무보고서\박홍제\monkey.jpg
+                 -> smartimg/1.업무보고서/박홍제/monkey.webp
 ```
 
 One file, one URL: replace the image on the NAS under the same name, re-run,

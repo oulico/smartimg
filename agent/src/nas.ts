@@ -32,7 +32,14 @@ export function parseShareMounts(spec: string): readonly ShareMount[] {
     })
 }
 
-export const DEFAULT_SHARE_MOUNTS = '/mnt/Public,/mnt/Data,/mnt/fga,/mnt/bi'
+/**
+ * One share, on purpose. Keys mirror the source path, so a published URL is
+ * guessable from the path — which is fine only when everything under the share
+ * is meant to be published. Confining uploads to a share that exists for that
+ * makes "is this publishable?" a question answered by where the file sits,
+ * rather than by whoever runs the command.
+ */
+export const DEFAULT_SHARE_MOUNTS = '/mnt/smartimg'
 
 export class NasPathError extends Error {
   constructor(message: string) {
