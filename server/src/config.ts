@@ -33,6 +33,12 @@ export function loadConfig(
   if (!mock && parsed.IMAGE_BUCKET === undefined) {
     throw new Error('IMAGE_BUCKET is required unless MOCK_S3=true')
   }
+  // Authentication is skipped when no token is set, which is only tolerable
+  // against the mock store. Refusing to start beats serving a real bucket's
+  // listing, overwrite and delete endpoints to anyone who can reach the port.
+  if (!mock && parsed.IMAGE_API_TOKEN === undefined) {
+    throw new Error('IMAGE_API_TOKEN is required unless MOCK_S3=true')
+  }
   return {
     port: parsed.PORT,
     bucket: parsed.IMAGE_BUCKET ?? '',

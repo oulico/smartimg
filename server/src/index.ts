@@ -3,10 +3,8 @@ import { loadConfig } from './config'
 
 const config = loadConfig()
 if (config.apiToken === undefined) {
-  console.warn(
-    '[smartimg] IMAGE_API_TOKEN is not set: authentication is disabled. ' +
-      'This is only acceptable in local development.',
-  )
+  // loadConfig only allows this in mock mode, so this is local development.
+  console.warn('[smartimg] IMAGE_API_TOKEN is not set: authentication is disabled (mock S3).')
 }
 
 const { app } = createApp(config)

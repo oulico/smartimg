@@ -15,8 +15,21 @@ export type PresignedUpload = {
   readonly headers: Readonly<Record<string, string>>
 }
 
+/**
+ * What the presigned URL commits the upload to. Every field here is signed, so
+ * the store rejects an upload that declares anything else — the API's checks
+ * are worth nothing if the client can simply send different values to S3.
+ */
+export type PresignPutRequest = {
+  readonly key: string
+  readonly contentType: string
+  /** Exact byte count. The API's size limit is only real because this is signed. */
+  readonly contentLength: number
+  readonly cacheControl: string
+}
+
 export interface ImageStore {
-  presignPut(key: string, contentType: string, cacheControl?: string): Promise<PresignedUpload>
+  presignPut(request: PresignPutRequest): Promise<PresignedUpload>
   list(folder: string | null, nextToken?: string): Promise<ListResult>
   delete(key: string): Promise<void>
 }

@@ -6,12 +6,12 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { Config } from './config'
-import {
-  CACHE_CONTROL,
-  type ImageStore,
-  type ListResult,
-  type PresignedUpload,
-  type StoredImage,
+import type {
+  ImageStore,
+  ListResult,
+  PresignedUpload,
+  PresignPutRequest,
+  StoredImage,
 } from './store'
 
 export function createS3Store(config: Config): ImageStore {
@@ -20,24 +20,34 @@ export function createS3Store(config: Config): ImageStore {
   )
 
   return {
-    async presignPut(
-      key: string,
-      contentType: string,
-      cacheControl: string = CACHE_CONTROL,
-    ): Promise<PresignedUpload> {
+    async presignPut(request: PresignPutRequest): Promise<PresignedUpload> {
       const command = new PutObjectCommand({
         Bucket: config.bucket,
-        Key: key,
-        ContentType: contentType,
-        CacheControl: cacheControl,
+        Key: request.key,
+        ContentType: request.contentType,
+        ContentLength: request.contentLength,
+        CacheControl: request.cacheControl,
       })
       const url = await getSignedUrl(client, command, {
         expiresIn: config.presignTtlSeconds,
-        unhoistableHeaders: new Set(['content-type', 'cache-control']),
+        // Naming these is the only thing that makes them binding, and it has to
+        // be signableHeaders: the S3 presigner unconditionally adds
+        // `content-type` to unsignableHeaders, and `cache-control` sits in
+        // signature-v4's ALWAYS_UNSIGNABLE_HEADERS. Only an explicit
+        // signableHeaders entry survives either exclusion. (unhoistableHeaders,
+        // used here before, governs whether x-amz-* headers move into the query
+        // string and does nothing at all for these three.)
+        signableHeaders: new Set(['content-type', 'cache-control', 'content-length']),
       })
       return {
         url,
-        headers: { 'Content-Type': contentType, 'Cache-Control': cacheControl },
+        // Content-Length is signed but deliberately absent here: browsers refuse
+        // to let a script set it and fill it in from the body instead, which is
+        // exactly the value that was signed.
+        headers: {
+          'Content-Type': request.contentType,
+          'Cache-Control': request.cacheControl,
+        },
       }
     },
 

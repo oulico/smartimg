@@ -15,8 +15,8 @@ import { CACHE_CONTROL, type ImageStore, mutableCacheControl } from './store'
 /**
  * Two ways to name an upload, and the server still builds the key either way.
  * `path` mirrors a NAS share path, so the key is stable and the object is
- * overwritten when the source changes; adding `contentHash` versions it
- * instead. `filename` is the original mode, where the server invents a UUID.
+ * overwritten when the source changes; adding `contentHash` — a digest of the
+ * bytes about to be uploaded — versions it under `_v/{digest}/` instead. `filename` is the original mode, where the server invents a UUID.
  */
 const PresignBodySchema = z.union([
   z.object({
@@ -74,7 +74,14 @@ export function imagesApi(config: Config, store: ImageStore): Hono {
     const cacheControl = overwritable
       ? mutableCacheControl(config.mutableMaxAgeSeconds)
       : CACHE_CONTROL
-    const { url, headers } = await store.presignPut(key, body.contentType, cacheControl)
+    // The declared size is signed, so it is the size S3 will actually accept —
+    // the check above is only a limit because of that.
+    const { url, headers } = await store.presignPut({
+      key,
+      contentType: body.contentType,
+      contentLength: body.size,
+      cacheControl,
+    })
     return c.json({ key, method: 'PUT' as const, url, headers })
   })
 
