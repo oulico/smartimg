@@ -1,7 +1,15 @@
 import { createHash } from 'node:crypto'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { buildImageUrl, IMAGE_PRESETS, type ImagePreset } from '@smartimg/shared'
+import {
+  buildImageUrl,
+  buildPathObjectKey,
+  buildPresetUrls,
+  IMAGE_PRESETS,
+  type ImagePreset,
+  InvalidKeyError,
+  isPublishablePath,
+} from '@smartimg/shared'
 import { CompressError, type CompressOptions, compressImage, DEFAULT_COMPRESS } from './compress'
 import { sniffImageMime } from './sniff'
 import { createUploader, UploadError } from './uploader'
@@ -130,15 +138,6 @@ export type NasRunOptions = {
   readonly versioned: boolean
 }
 
-function presetUrls(cdnBase: string, key: string): Readonly<Record<ImagePreset, string>> {
-  const names = Object.keys(IMAGE_PRESETS) as readonly ImagePreset[]
-  const out = {} as Record<ImagePreset, string>
-  for (const name of names) {
-    out[name] = buildImageUrl(cdnBase, key, { preset: name })
-  }
-  return out
-}
-
 export async function uploadNasPaths(
   targets: readonly string[],
   options: NasRunOptions,
@@ -147,7 +146,6 @@ export async function uploadNasPaths(
     apiBaseUrl: options.apiBaseUrl,
     apiToken: options.apiToken,
     cdnBase: options.cdnBase,
-    folder: 'uploads',
   })
 
   const outcomes: NasUploadOutcome[] = []
@@ -189,6 +187,10 @@ async function uploadOne(
     }
   }
 
+  if (!isPublishablePath(sharePath)) {
+    return { status: 'skipped', source: file, reason: 'sits at the share root, not in a folder' }
+  }
+
   const sourceBytes = new Uint8Array(source)
   const mime = sniffImageMime(sourceBytes)
   if (mime === null) {
@@ -215,14 +217,23 @@ async function uploadOne(
     : undefined
 
   if (options.dryRun) {
-    const key = predictKey(sharePath, contentHash)
+    // The same rule the server applies, so a path it would refuse fails here too.
+    let key: string
+    try {
+      key = buildPathObjectKey({ path: sharePath, contentHash })
+    } catch (error) {
+      if (error instanceof InvalidKeyError) {
+        return { status: 'failed', source: file, reason: error.message }
+      }
+      throw error
+    }
     return {
       status: 'uploaded',
       source: file,
       sharePath,
       key,
       url: buildImageUrl(options.cdnBase, key),
-      presets: presetUrls(options.cdnBase, key),
+      presets: buildPresetUrls(options.cdnBase, key),
       sourceBytes: sourceBytes.byteLength,
       storedBytes: compressed.bytes.byteLength,
     }
@@ -242,7 +253,7 @@ async function uploadOne(
       sharePath,
       key: uploaded.key,
       url: uploaded.url,
-      presets: presetUrls(options.cdnBase, uploaded.key),
+      presets: buildPresetUrls(options.cdnBase, uploaded.key),
       sourceBytes: sourceBytes.byteLength,
       storedBytes: compressed.bytes.byteLength,
     }
@@ -252,20 +263,6 @@ async function uploadOne(
     }
     throw error
   }
-}
-
-// Both must match buildPathObjectKey in server/src/keys.ts; the tests below and
-// in server/test/path-keys.test.ts assert the same examples on both sides.
-const VERSION_PREFIX = '_v'
-const HASH_LENGTH = 7
-
-/** Mirrors the server's rule so --dry-run can show the real URL without a call. */
-export function predictKey(sharePath: string, contentHash: string | undefined): string {
-  const segments = sharePath.split('/').filter((segment) => segment !== '')
-  const share = (segments[0] ?? '').toLowerCase()
-  const path = [share, ...segments.slice(1)]
-  if (contentHash === undefined) return path.join('/')
-  return [VERSION_PREFIX, contentHash.slice(0, HASH_LENGTH), ...path].join('/')
 }
 
 // ---------------------------------------------------------------- entry point

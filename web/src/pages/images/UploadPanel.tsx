@@ -8,23 +8,8 @@ import { presignUpload } from '../../lib/api'
 const MAX_UPLOAD_BYTES = 10_485_760
 const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif']
 
-function logicalFolder(folder: string | null): string | undefined {
-  if (folder === null) {
-    return undefined
-  }
-  const segments = folder.split('/')
-  while (segments.length > 1) {
-    const last = segments[segments.length - 1] ?? ''
-    if (!/^\d{2}$/.test(last) && !/^\d{4}$/.test(last)) {
-      break
-    }
-    segments.pop()
-  }
-  return segments.join('/')
-}
-
 export type UploadPanelProps = {
-  readonly folder: string | null
+  readonly folder: string
 }
 
 export function UploadPanel({ folder }: UploadPanelProps) {
@@ -62,7 +47,8 @@ export function UploadPanel({ folder }: UploadPanelProps) {
           filename: file.name ?? 'image',
           contentType: file.type ?? '',
           size: file.size ?? 0,
-          folder: logicalFolder(folderRef.current),
+          // Uploads land under the prefix being browsed.
+          folder: folderRef.current,
         }).then((response) => ({
           method: 'PUT' as const,
           url: response.url,

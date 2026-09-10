@@ -3,7 +3,9 @@ import type { Dirent } from 'node:fs'
 import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
+import { isPublishablePath } from '@smartimg/shared'
 import { CompressError, type CompressOptions, compressImage, DEFAULT_COMPRESS } from './compress'
+import { hasErrnoCode } from './errno'
 import { GALLERY_FILENAME, type GalleryEntry, renderGallery } from './gallery'
 import { parseShareMounts, type ShareMount, toSharePath } from './nas'
 import { sniffImageMime } from './sniff'
@@ -60,13 +62,28 @@ type StateRecord = {
   readonly uploadedAt: string
 }
 
-type State = Record<string, StateRecord>
+/** What has been uploaded, by share path. The only record of it there is. */
+export type State = Record<string, StateRecord>
 
+/**
+ * A file that is not there is the only thing that means "nothing uploaded yet".
+ * A permission error, an unreadable mount or damaged JSON must not be reported
+ * as an empty state: the pass would find no record of anything, prune the lot
+ * and upload the whole share again. Those are raised so the pass stops and the
+ * loop logs them instead.
+ */
 export async function loadState(path: string): Promise<State> {
+  let text: string
   try {
-    return JSON.parse(await readFile(path, 'utf8')) as State
-  } catch {
-    return {}
+    text = await readFile(path, 'utf8')
+  } catch (error) {
+    if (hasErrnoCode(error, 'ENOENT')) return {}
+    throw new Error('업로드 기록을 읽을 수 없습니다 (' + path + '): ' + String(error))
+  }
+  try {
+    return JSON.parse(text) as State
+  } catch (error) {
+    throw new Error('업로드 기록이 손상되었습니다 (' + path + '): ' + String(error))
   }
 }
 
@@ -141,120 +158,138 @@ function unscannedPrefixes(
   return prefixes
 }
 
-export type PassResult = {
-  readonly uploaded: number
-  readonly failed: number
-  readonly skipped: number
-  readonly galleryWritten: boolean
-  /** Directories the pass could not read; non-empty means its view of the share is partial. */
-  readonly unreadable: readonly string[]
-}
-
 function log(message: string): void {
   process.stdout.write('[smartimg-watch] ' + message + '\n')
 }
 
+type Upload = ReturnType<typeof createUploader>
+
+type FileOutcome = 'unchanged' | 'skipped' | 'uploaded' | 'failed'
+
+/** What happened to one file, and whether its record in the state was touched. */
+type FileSync = { readonly outcome: FileOutcome; readonly changed: boolean }
+
+const UNCHANGED: FileSync = { outcome: 'unchanged', changed: false }
+const SKIPPED: FileSync = { outcome: 'skipped', changed: false }
+const FAILED: FileSync = { outcome: 'failed', changed: false }
+
+/** Brings one file's record up to date, uploading only when its bytes changed. */
+async function syncFile(
+  config: WatchConfig,
+  upload: Upload,
+  state: State,
+  sharePath: string,
+  candidate: Candidate,
+  now: number,
+): Promise<FileSync> {
+  const previous = state[sharePath]
+
+  // Unchanged since the last upload: nothing to do, and no file to read.
+  if (
+    previous !== undefined &&
+    previous.size === candidate.size &&
+    previous.mtimeMs === candidate.mtimeMs
+  ) {
+    return UNCHANGED
+  }
+
+  // Still being written: wait for it to hold still before reading.
+  if (now - candidate.mtimeMs < config.settleMs) return UNCHANGED
+
+  let bytes: Buffer
+  try {
+    bytes = await readFile(candidate.path)
+  } catch {
+    return UNCHANGED
+  }
+
+  const source = new Uint8Array(bytes)
+  const mime = sniffImageMime(source)
+  if (mime === null) return SKIPPED
+
+  const hash = createHash('sha256').update(bytes).digest('hex')
+  if (previous !== undefined && previous.hash === hash) {
+    // Only the timestamp moved — record it so the next pass stays cheap.
+    state[sharePath] = { ...previous, size: candidate.size, mtimeMs: candidate.mtimeMs }
+    return { outcome: 'unchanged', changed: true }
+  }
+
+  let compressed: Awaited<ReturnType<typeof compressImage>>
+  try {
+    compressed = await compressImage(source, mime, config.compress)
+  } catch (error) {
+    log('압축 실패 ' + sharePath + ': ' + (error instanceof CompressError ? error.message : error))
+    return FAILED
+  }
+
+  try {
+    const result = await upload({
+      filename: candidate.path,
+      contentType: compressed.contentType,
+      bytes: compressed.bytes,
+      path: sharePath,
+    })
+    state[sharePath] = {
+      hash,
+      key: result.key,
+      size: candidate.size,
+      mtimeMs: candidate.mtimeMs,
+      sourceBytes: source.byteLength,
+      storedBytes: compressed.bytes.byteLength,
+      uploadedAt: new Date().toISOString(),
+    }
+    log('업로드 ' + sharePath + ' -> ' + result.key)
+    return { outcome: 'uploaded', changed: true }
+  } catch (error) {
+    log('업로드 실패 ' + sharePath + ': ' + (error instanceof UploadError ? error.message : error))
+    return FAILED
+  }
+}
+
+export type PassResult = {
+  readonly uploaded: number
+  readonly failed: number
+  readonly skipped: number
+  /** The state file was rewritten: something was uploaded, re-stamped or forgotten. */
+  readonly changed: boolean
+  /** The state after this pass, for whatever is derived from it. */
+  readonly state: State
+  /** Directories the pass could not read; non-empty means its view of the share is partial. */
+  readonly unreadable: readonly string[]
+}
+
+/**
+ * One sweep of the share: upload what is new or changed, forget what is gone,
+ * and save the state. Nothing else — the link list is the caller's to write,
+ * from the state this returns.
+ */
 export async function runPass(
   config: WatchConfig,
   mounts: readonly ShareMount[],
-  upload: ReturnType<typeof createUploader>,
+  upload: Upload,
 ): Promise<PassResult> {
   const state = await loadState(config.statePath)
   const scan: Scan = { found: [], unreadable: [] }
   await collect(config.root, scan)
-  const found = scan.found
 
   const now = Date.now()
-  let uploaded = 0
-  let failed = 0
-  let skipped = 0
-  let dirty = false
-
+  const counts = { uploaded: 0, failed: 0, skipped: 0 }
+  let changed = false
   const live = new Set<string>()
 
-  for (const candidate of found) {
-    const sharePath = (() => {
-      try {
-        return toSharePath(candidate.path, mounts)
-      } catch {
-        return null
-      }
-    })()
-    if (sharePath === null) continue
-
-    const previous = state[sharePath]
-    live.add(sharePath)
-
-    // Unchanged since the last upload: nothing to do, and no file to read.
-    if (
-      previous !== undefined &&
-      previous.size === candidate.size &&
-      previous.mtimeMs === candidate.mtimeMs
-    ) {
-      continue
-    }
-
-    // Still being written: wait for it to hold still before reading.
-    if (now - candidate.mtimeMs < config.settleMs) continue
-
-    let bytes: Buffer
+  for (const candidate of scan.found) {
+    let sharePath: string
     try {
-      bytes = await readFile(candidate.path)
+      sharePath = toSharePath(candidate.path, mounts)
     } catch {
       continue
     }
-
-    const source = new Uint8Array(bytes)
-    const mime = sniffImageMime(source)
-    if (mime === null) {
-      skipped += 1
-      continue
-    }
-
-    const hash = createHash('sha256').update(bytes).digest('hex')
-    if (previous !== undefined && previous.hash === hash) {
-      // Only the timestamp moved — record it so the next pass stays cheap.
-      state[sharePath] = { ...previous, size: candidate.size, mtimeMs: candidate.mtimeMs }
-      dirty = true
-      continue
-    }
-
-    let compressed: Awaited<ReturnType<typeof compressImage>>
-    try {
-      compressed = await compressImage(source, mime, config.compress)
-    } catch (error) {
-      failed += 1
-      log(
-        '압축 실패 ' + sharePath + ': ' + (error instanceof CompressError ? error.message : error),
-      )
-      continue
-    }
-
-    try {
-      const result = await upload({
-        filename: candidate.path,
-        contentType: compressed.contentType,
-        bytes: compressed.bytes,
-        path: sharePath,
-      })
-      state[sharePath] = {
-        hash,
-        key: result.key,
-        size: candidate.size,
-        mtimeMs: candidate.mtimeMs,
-        sourceBytes: source.byteLength,
-        storedBytes: compressed.bytes.byteLength,
-        uploadedAt: new Date().toISOString(),
-      }
-      dirty = true
-      uploaded += 1
-      log('업로드 ' + sharePath + ' -> ' + result.key)
-    } catch (error) {
-      failed += 1
-      log(
-        '업로드 실패 ' + sharePath + ': ' + (error instanceof UploadError ? error.message : error),
-      )
-    }
+    // A file sitting at the share root has no folder to be published under.
+    if (!isPublishablePath(sharePath)) continue
+    live.add(sharePath)
+    const sync = await syncFile(config, upload, state, sharePath, candidate, now)
+    changed = changed || sync.changed
+    if (sync.outcome !== 'unchanged') counts[sync.outcome] += 1
   }
 
   // Files removed from the share drop out of the listing. The S3 object is left
@@ -271,16 +306,21 @@ export async function runPass(
     if (live.has(known)) continue
     if (unscanned.some((prefix) => known === prefix || known.startsWith(prefix + '/'))) continue
     delete state[known]
-    dirty = true
+    changed = true
   }
 
-  if (dirty) await saveState(config.statePath, state)
+  if (changed) await saveState(config.statePath, state)
 
-  const galleryWritten = dirty ? await writeGallery(config, state) : false
-  return { uploaded, failed, skipped, galleryWritten, unreadable: scan.unreadable }
+  return { ...counts, changed, state, unreadable: scan.unreadable }
 }
 
-async function writeGallery(config: WatchConfig, state: State): Promise<boolean> {
+/**
+ * Writes the link list into the share, via a temp file so a reader never sees
+ * it half-written. Returns false when it could not be written, so the caller
+ * can try again on a later pass — the state has already moved on by then, so
+ * nothing in the share will prompt it otherwise.
+ */
+export async function writeGallery(config: WatchConfig, state: State): Promise<boolean> {
   const entries: GalleryEntry[] = Object.entries(state).map(([sharePath, record]) => ({
     sharePath: sharePath.startsWith(config.share + '/')
       ? sharePath.slice(config.share.length + 1)
@@ -310,7 +350,6 @@ export async function main(env: NodeJS.ProcessEnv): Promise<number> {
     apiBaseUrl: config.apiBaseUrl,
     apiToken: config.apiToken,
     cdnBase: config.cdnBase,
-    folder: 'uploads',
   })
 
   log('감시 시작: ' + config.root + ' (share: ' + config.share + ')')
@@ -325,9 +364,15 @@ export async function main(env: NodeJS.ProcessEnv): Promise<number> {
   process.on('SIGTERM', halt)
 
   let degraded = false
+  // Stale until proven written: after a restart nothing looks changed, and a
+  // list left stale by the previous run would otherwise never be rewritten.
+  let galleryStale = true
   while (!stop) {
     try {
       const result = await runPass(config, mounts, upload)
+      galleryStale = galleryStale || result.changed
+      const galleryWritten: boolean = galleryStale && (await writeGallery(config, result.state))
+      galleryStale = galleryStale && !galleryWritten
       // Logged on the way in and on the way out only: a mount that stays down
       // would otherwise write one line per poll for as long as it is down.
       if (result.unreadable.length > 0 && !degraded) {
@@ -349,7 +394,7 @@ export async function main(env: NodeJS.ProcessEnv): Promise<number> {
             String(result.uploaded) +
             ' · 실패 ' +
             String(result.failed) +
-            (result.galleryWritten ? ' · 목록 갱신됨' : ''),
+            (galleryWritten ? ' · 목록 갱신됨' : ''),
         )
       }
     } catch (error) {

@@ -32,7 +32,8 @@ export type UploadedImage = {
 export type UploaderConfig = {
   readonly apiBaseUrl: string
   readonly apiToken: string | undefined
-  readonly folder: string
+  /** Where a filename upload is filed. Path uploads carry their own folder. */
+  readonly folder?: string | undefined
   readonly cdnBase: string
 }
 

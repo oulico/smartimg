@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { buildImageUrl, type ImagePreset } from '@smartimg/shared'
+import { buildPresetUrls, IMAGE_PRESETS, type ImagePreset } from '@smartimg/shared'
 import { hasErrnoCode } from './errno'
 
 type UploadedResult = {
@@ -30,12 +30,7 @@ export type BatchPaths = {
   readonly mdPath: string
 }
 
-const PRESET_IDS = [
-  'thumbnail',
-  'productCard',
-  'productDetail',
-  'hero',
-] as const satisfies readonly ImagePreset[]
+const PRESET_IDS = Object.keys(IMAGE_PRESETS) as readonly ImagePreset[]
 
 function assertNever(value: never): never {
   throw new Error('unexpected variant: ' + String(value))
@@ -60,15 +55,7 @@ type JsonEntry =
 function toJsonEntry(result: UploadResult, cdnBase: string): JsonEntry {
   switch (result.status) {
     case 'uploaded': {
-      return {
-        ...result,
-        presets: {
-          thumbnail: buildImageUrl(cdnBase, result.key, { preset: 'thumbnail' }),
-          productCard: buildImageUrl(cdnBase, result.key, { preset: 'productCard' }),
-          productDetail: buildImageUrl(cdnBase, result.key, { preset: 'productDetail' }),
-          hero: buildImageUrl(cdnBase, result.key, { preset: 'hero' }),
-        },
-      }
+      return { ...result, presets: buildPresetUrls(cdnBase, result.key) }
     }
     case 'failed':
       return result

@@ -40,8 +40,9 @@ describe('normalizeSourcePath', () => {
     expect(() => normalizeSourcePath('200x200/a.jpg')).toThrow(ApiError)
   })
 
-  it('needs at least a share and a filename', () => {
+  it('needs a folder between the share and the filename', () => {
     expect(() => normalizeSourcePath('monkey.jpg')).toThrow(ApiError)
+    expect(() => normalizeSourcePath('smartimg/monkey.jpg')).toThrow(ApiError)
   })
 })
 
@@ -55,21 +56,21 @@ describe('buildPathObjectKey', () => {
   })
 
   it('keeps two source files that differ only by extension apart', () => {
-    const jpg = buildPathObjectKey({ path: 'smartimg/김치.jpg', contentType: 'image/jpeg' })
-    const png = buildPathObjectKey({ path: 'smartimg/김치.png', contentType: 'image/png' })
-    expect(jpg).toBe('smartimg/김치.jpg')
-    expect(png).toBe('smartimg/김치.png')
+    const jpg = buildPathObjectKey({ path: 'smartimg/사진/김치.jpg', contentType: 'image/jpeg' })
+    const png = buildPathObjectKey({ path: 'smartimg/사진/김치.png', contentType: 'image/png' })
+    expect(jpg).toBe('smartimg/사진/김치.jpg')
+    expect(png).toBe('smartimg/사진/김치.png')
     expect(jpg).not.toBe(png)
   })
 
   it('maps distinct source paths to distinct keys', () => {
     const paths = [
-      'smartimg/김치.jpg',
-      'smartimg/김치.png',
-      'smartimg/김치.webp',
-      'smartimg/김치.jpg.webp',
-      'smartimg/김치',
       'smartimg/사진/김치.jpg',
+      'smartimg/사진/김치.png',
+      'smartimg/사진/김치.webp',
+      'smartimg/사진/김치.jpg.webp',
+      'smartimg/사진/김치',
+      'smartimg/김치/사진.jpg',
     ]
     const keys = paths.map((path) => buildPathObjectKey({ path, contentType: 'image/jpeg' }))
     expect(new Set(keys).size).toBe(paths.length)
@@ -77,7 +78,7 @@ describe('buildPathObjectKey', () => {
 
   it('refuses a contentType that is not an image', () => {
     expect(() =>
-      buildPathObjectKey({ path: 'smartimg/김치.jpg', contentType: 'text/html' }),
+      buildPathObjectKey({ path: 'smartimg/사진/김치.jpg', contentType: 'text/html' }),
     ).toThrow(ApiError)
   })
 
@@ -115,7 +116,7 @@ describe('buildPathObjectKey', () => {
 
   it('refuses a share that would sit where versioned objects live', () => {
     expect(() =>
-      buildPathObjectKey({ path: '_v/9f3a2c1/anything.jpg', contentType: 'image/jpeg' }),
+      buildPathObjectKey({ path: '_v/9f3a2c1/a/anything.jpg', contentType: 'image/jpeg' }),
     ).toThrow(ApiError)
   })
 
@@ -169,8 +170,8 @@ describe('normalizeListPrefix', () => {
     expect(normalizeListPrefix('public/1.업무보고서/박홍제')).toBe('public/1.업무보고서/박홍제')
   })
 
-  it('falls back to the default folder when empty', () => {
-    expect(normalizeListPrefix('  ')).toBe('uploads')
+  it('is empty at the root', () => {
+    expect(normalizeListPrefix('  ')).toBe('')
   })
 
   it('refuses traversal', () => {

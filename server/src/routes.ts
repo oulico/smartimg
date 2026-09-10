@@ -29,7 +29,7 @@ const PresignBodySchema = z.union([
     filename: z.string().trim().min(1).max(255),
     contentType: z.string(),
     size: z.number().int().positive(),
-    folder: z.string().optional(),
+    folder: z.string(),
   }),
 ])
 
@@ -87,7 +87,8 @@ export function imagesApi(config: Config, store: ImageStore): Hono {
 
   app.get('/', async (c) => {
     const query = ListQuerySchema.parse(c.req.query())
-    const folder = query.folder === undefined ? null : normalizeListPrefix(query.folder)
+    const prefix = normalizeListPrefix(query.folder ?? '')
+    const folder = prefix === '' ? null : prefix
     const result = await store.list(folder, query.nextToken)
     return c.json({
       objects: result.objects.map((object) => ({

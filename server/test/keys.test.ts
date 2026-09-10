@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { assertSafeKey, buildObjectKey, normalizeFolder, sanitizeFilename } from '../src/keys'
+import { assertSafeKey, buildObjectKey, normalizeUploadPrefix, sanitizeFilename } from '../src/keys'
 
-const FIXED_NOW = new Date('2026-09-09T00:00:00Z')
 const FIXED_UUID = '0192f0c1-0000-7000-8000-000000000000'
 
 describe('buildObjectKey', () => {
@@ -10,17 +9,16 @@ describe('buildObjectKey', () => {
       filename: 'Hero Product FINAL!!..JPG',
       contentType: 'image/jpeg',
       folder: 'Products',
-      now: FIXED_NOW,
       uuid: FIXED_UUID,
     })
-    expect(key).toBe('products/2026/09/0192f0c1-0000-7000-8000-000000000000-hero-product-final.jpg')
+    expect(key).toBe('Products/0192f0c1-0000-7000-8000-000000000000-hero-product-final.jpg')
   })
 
   it('derives the extension from the MIME type, never from the filename', () => {
     const key = buildObjectKey({
       filename: 'sneaky.png',
       contentType: 'image/webp',
-      now: FIXED_NOW,
+      folder: 'products',
       uuid: FIXED_UUID,
     })
     expect(key.endsWith('-sneaky.webp')).toBe(true)
@@ -31,16 +29,25 @@ describe('buildObjectKey', () => {
   })
 })
 
-describe('normalizeFolder', () => {
-  it('normalizes case, slashes and defaults', () => {
-    expect(normalizeFolder('/Products/')).toBe('products')
-    expect(normalizeFolder('  ')).toBe('uploads')
+describe('normalizeUploadPrefix', () => {
+  // The prefix being browsed is where the upload goes, so it has to accept
+  // every folder a listing can show — the NAS mirrors included.
+  it('keeps the browsed prefix as it is, Korean and dates included', () => {
+    expect(normalizeUploadPrefix('smartimg/상품/여름')).toBe('smartimg/상품/여름')
+    expect(normalizeUploadPrefix('uploads/2026/09')).toBe('uploads/2026/09')
+    expect(normalizeUploadPrefix('/products/')).toBe('products')
   })
 
-  it('rejects traversal and unsafe segments', () => {
-    expect(() => normalizeFolder('..')).toThrow()
-    expect(() => normalizeFolder('products/../users')).toThrow()
-    expect(() => normalizeFolder('a/b/c/d/e')).toThrow()
+  it('has no default: nothing is filed at the root', () => {
+    expect(() => normalizeUploadPrefix(undefined)).toThrow(/folder is required/)
+    expect(() => normalizeUploadPrefix('  ')).toThrow(/folder is required/)
+  })
+
+  it('rejects traversal, unusable characters and reserved first segments', () => {
+    expect(() => normalizeUploadPrefix('..')).toThrow()
+    expect(() => normalizeUploadPrefix('products/../users')).toThrow()
+    expect(() => normalizeUploadPrefix('_v/abc')).toThrow()
+    expect(() => normalizeUploadPrefix('200x200/a')).toThrow()
   })
 })
 

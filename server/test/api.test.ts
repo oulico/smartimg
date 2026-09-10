@@ -46,7 +46,7 @@ describe('POST /api/images/presign', () => {
     expect(response.status).toBe(200)
     const body = (await response.json()) as { key: string; method: string; url: string }
     expect(body.method).toBe('PUT')
-    expect(body.key).toMatch(/^products\/\d{4}\/\d{2}\/[0-9a-f-]+-shoe\.png$/)
+    expect(body.key).toMatch(/^products\/[0-9a-f-]+-shoe\.png$/)
     expect(body.url).toContain('/mock-put/')
   })
 
@@ -198,9 +198,9 @@ describe('upload, list, delete flow', () => {
     }
     expect(listBody.objects.map((object) => object.key)).toContain(key)
 
-    const rootListed = await app.request('/api/images?folder=products', { headers: AUTH })
+    const rootListed = await app.request('/api/images', { headers: AUTH })
     const rootBody = (await rootListed.json()) as { folders: string[] }
-    expect(rootBody.folders.length).toBeGreaterThan(0)
+    expect(rootBody.folders).toContain('products')
 
     const deleted = await app.request('/api/images/' + key, { method: 'DELETE', headers: AUTH })
     expect(deleted.status).toBe(204)

@@ -15,6 +15,7 @@ API the web app uses, then files them into per-outcome folders.
 
 The agent never stores AWS credentials. It only talks to the image API with an
 optional bearer token; the server performs the S3 presigning and key naming.
+Uploads are filed under `IMAGE_FOLDER` (default `uploads`).
 
 ## Run in the foreground
 
@@ -56,13 +57,15 @@ share    directories kept verbatim     filename verbatim
 smartimg / 1.업무보고서 / 박홍제      / monkey.jpg
 ```
 
+A file placed directly at the share root, outside any folder, is ignored.
 The share name is lowercased and becomes the first segment; every directory
 below it is kept exactly as the NAS spells it, Korean and spaces included (the
 URL percent-encodes them). The filename carries across untouched, extension
 included — it is *not* derived from the MIME type, because that would map
 monkey.jpg and monkey.png onto one key and let the last upload silently win.
-Compression re-encodes in the source format for the same reason; WebP is
-negotiated at the edge through the preset URLs instead.
+Compression re-encodes in the source format by default for the same reason;
+WebP is negotiated at the edge through the preset URLs instead. Opting into
+`SMARTIMG_TO_WEBP` stores WebP bytes under the source filename.
 
 One file, one URL, for good. Drop a new image onto the NAS under the same name,
 re-run the command, and the object is overwritten — the link you already sent
@@ -115,7 +118,7 @@ NAS can ever land on a versioned object's key.
 | `SMARTIMG_SHARES` | `/mnt/smartimg` | mount points to accept, `path=share` to rename |
 | `SMARTIMG_MAX_EDGE` | `2400` | longest edge in pixels; larger images are scaled down |
 | `SMARTIMG_QUALITY` | `82` | encoder quality |
-| `SMARTIMG_KEEP_FORMAT` | unset | set to keep the source format instead of converting to WebP |
+| `SMARTIMG_TO_WEBP` | unset | set to `true` to store WebP instead of the source format; the key still carries the source filename |
 
 Paths outside every configured share are refused, as are `..` segments, so the
 command cannot be pointed at the rest of the filesystem. GIFs are uploaded

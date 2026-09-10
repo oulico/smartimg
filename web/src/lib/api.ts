@@ -16,7 +16,7 @@ export type PresignRequest = {
   readonly filename: string
   readonly contentType: string
   readonly size: number
-  readonly folder?: string | undefined
+  readonly folder: string
 }
 
 export type PresignResponse = {
@@ -33,10 +33,19 @@ const client = ky.create({
   headers: token === '' ? {} : { Authorization: 'Bearer ' + token },
 })
 
-export function listImages(folder: string | null): Promise<ListImagesResponse> {
-  return client
-    .get('images', { searchParams: folder === null ? {} : { folder } })
-    .json<ListImagesResponse>()
+/**
+ * One page. A response with a nextToken has more behind it: pass that token
+ * back to get the next page, which is what the images list does as you reach
+ * the end of it.
+ */
+export function listImages(
+  folder: string | null,
+  nextToken?: string | undefined,
+): Promise<ListImagesResponse> {
+  const searchParams: Record<string, string> = {}
+  if (folder !== null) searchParams['folder'] = folder
+  if (nextToken !== undefined) searchParams['nextToken'] = nextToken
+  return client.get('images', { searchParams }).json<ListImagesResponse>()
 }
 
 export function presignUpload(body: PresignRequest): Promise<PresignResponse> {

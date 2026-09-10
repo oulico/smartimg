@@ -21,8 +21,6 @@
     <string>http://127.0.0.1:8787/mock-cdn</string>
     <key>AGENT_ROOT</key>
     <string>__HOME__/ImageDrop</string>
-    <key>IMAGE_FOLDER</key>
-    <string>uploads</string>
   </dict>
 
   <key>RunAtLoad</key>

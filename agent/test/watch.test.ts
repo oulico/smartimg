@@ -1,10 +1,11 @@
-import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { GALLERY_FILENAME } from '../src/gallery'
 import { parseShareMounts, type ShareMount } from '../src/nas'
 import type { UploadRequest } from '../src/uploader'
-import { loadState, runPass, type WatchConfig } from '../src/watch'
+import { loadState, runPass, type WatchConfig, writeGallery } from '../src/watch'
 
 async function png(): Promise<Uint8Array> {
   const sharp = (await import('sharp')).default
@@ -79,6 +80,15 @@ describe('runPass', () => {
     expect(upload.paths).toHaveLength(1)
   })
 
+  it('ignores a file sitting at the share root, outside any folder', async () => {
+    await writeImage(join(root, '20260907_112746.jpg'))
+    await writeImage(join(root, '상품', 'monkey.png'))
+    const upload = stubUpload()
+    const result = await runPass(configFor(root), mounts, upload)
+    expect(result.uploaded).toBe(1)
+    expect(upload.paths).toEqual(['smartimg/상품/monkey.png'])
+  })
+
   it('forgets a file that was really deleted from the share', async () => {
     const file = join(root, '상품', 'monkey.png')
     await writeImage(file)
@@ -114,13 +124,14 @@ describe('runPass', () => {
   it.skipIf(process.getuid?.() === 0)(
     'keeps only what sits under an unreadable directory, and prunes the rest',
     async () => {
-      await writeImage(join(root, 'top.png'))
+      await mkdir(join(root, '기타'))
+      await writeImage(join(root, '기타', 'top.png'))
       await writeImage(join(root, '상품', 'monkey.png'))
       await runPass(configFor(root), mounts, stubUpload())
       expect(Object.keys(await loadState(statePath))).toHaveLength(2)
 
       // Both disappear from view, but only one of them is actually known to be gone.
-      await rm(join(root, 'top.png'))
+      await rm(join(root, '기타', 'top.png'))
       await chmod(join(root, '상품'), 0o000)
       try {
         const result = await runPass(configFor(root), mounts, stubUpload())
@@ -131,4 +142,50 @@ describe('runPass', () => {
       }
     },
   )
+})
+
+/**
+ * The state file is the only record of what has been uploaded. Reading it
+ * wrongly as "nothing yet" prunes every record and re-uploads the share, so an
+ * error that is not "the file is not there" has to reach the caller.
+ */
+describe('loadState', () => {
+  it('starts empty when no state file has been written yet', async () => {
+    expect(await loadState(join(root, 'never-written.json'))).toEqual({})
+  })
+
+  it('raises rather than reporting an empty state when the path cannot be read', async () => {
+    const asDirectory = join(root, 'state-dir.json')
+    await mkdir(asDirectory)
+    await expect(loadState(asDirectory)).rejects.toThrow('업로드 기록을 읽을 수 없습니다')
+  })
+
+  it('raises when the state file is damaged', async () => {
+    await writeFile(statePath, '{"smartimg/a.png": {', 'utf8')
+    await expect(loadState(statePath)).rejects.toThrow('업로드 기록이 손상되었습니다')
+  })
+})
+
+describe('the link list', () => {
+  it('reports the state as changed only when something was uploaded, re-stamped or forgotten', async () => {
+    await writeImage(join(root, '상품', 'monkey.png'))
+    expect((await runPass(configFor(root), mounts, stubUpload())).changed).toBe(true)
+    expect((await runPass(configFor(root), mounts, stubUpload())).changed).toBe(false)
+    await rm(join(root, '상품', 'monkey.png'))
+    expect((await runPass(configFor(root), mounts, stubUpload())).changed).toBe(true)
+  })
+
+  // The state file has already been saved by then, so a later pass sees no
+  // change; the loop keeps the list marked stale until a write succeeds.
+  it('says so when it could not be written, and writes on a later try', async () => {
+    await writeImage(join(root, '상품', 'monkey.png'))
+    const result = await runPass(configFor(root), mounts, stubUpload())
+    // A directory where the list belongs: the rename onto it fails.
+    await mkdir(join(root, GALLERY_FILENAME))
+    expect(await writeGallery(configFor(root), result.state)).toBe(false)
+
+    await rm(join(root, GALLERY_FILENAME), { recursive: true })
+    expect(await writeGallery(configFor(root), result.state)).toBe(true)
+    expect((await stat(join(root, GALLERY_FILENAME))).isFile()).toBe(true)
+  })
 })

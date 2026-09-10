@@ -103,6 +103,7 @@ describe('a path-mirrored key follows the source file', () => {
       filename: 'monkey.png',
       contentType: 'image/png',
       size: 32,
+      folder: 'products',
     })
     expect(presigned.headers['Cache-Control']).toBe('public, max-age=31536000, immutable')
   })

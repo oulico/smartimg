@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { buildPathObjectKey } from '@smartimg/shared'
 import { describe, expect, it } from 'vitest'
 import { compressImage } from '../src/compress'
 import {
@@ -9,7 +10,6 @@ import {
   NasPathError,
   parseArgs,
   parseShareMounts,
-  predictKey,
   toLocalPath,
   toSharePath,
   uploadNasPaths,
@@ -68,26 +68,6 @@ describe('toLocalPath', () => {
   })
 })
 
-describe('predictKey', () => {
-  it('agrees with the server rule so --dry-run shows the real URL', () => {
-    expect(predictKey('smartimg/1.업무보고서/박홍제/monkey.jpg', undefined)).toBe(
-      'smartimg/1.업무보고서/박홍제/monkey.jpg',
-    )
-  })
-
-  it('puts a versioned object under the same prefix the server uses', () => {
-    expect(predictKey('smartimg/1.업무보고서/박홍제/monkey.jpg', '9f3a2c1dead')).toBe(
-      '_v/9f3a2c1/smartimg/1.업무보고서/박홍제/monkey.jpg',
-    )
-  })
-
-  it('keeps sources that differ only by extension apart', () => {
-    expect(predictKey('smartimg/김치.jpg', undefined)).not.toBe(
-      predictKey('smartimg/김치.png', undefined),
-    )
-  })
-})
-
 /**
  * A versioned key is served with a year of immutable caching, so it has to name
  * the bytes stored under it. The digest therefore covers the compressed output,
@@ -112,7 +92,7 @@ describe('a versioned key names the bytes it holds', () => {
       toWebp: false,
     })
     const digest = createHash('sha256').update(compressed.bytes).digest('hex')
-    return predictKey('smartimg/사진/monkey.jpg', digest)
+    return buildPathObjectKey({ path: 'smartimg/사진/monkey.jpg', contentHash: digest })
   }
 
   it('moves to a new URL when the compression setting changes the stored bytes', async () => {
@@ -129,11 +109,12 @@ describe('a versioned key names the bytes it holds', () => {
   // not just the hashing helper above.
   it('is what --dry-run predicts for the same file at two qualities', async () => {
     const root = await mkdtemp(join(tmpdir(), 'smartimg-version-'))
-    await writeFile(join(root, 'monkey.jpg'), await noisyJpeg())
+    await mkdir(join(root, '사진'))
+    await writeFile(join(root, '사진', 'monkey.jpg'), await noisyJpeg())
     const mounts = parseShareMounts(root + '=smartimg')
 
     async function run(quality: number): Promise<string> {
-      const [outcome] = await uploadNasPaths([join(root, 'monkey.jpg')], {
+      const [outcome] = await uploadNasPaths([join(root, '사진', 'monkey.jpg')], {
         apiBaseUrl: 'http://127.0.0.1:1/api',
         apiToken: undefined,
         cdnBase: 'https://cdn.example.com',
@@ -149,7 +130,7 @@ describe('a versioned key names the bytes it holds', () => {
 
     const lean = await run(40)
     const rich = await run(90)
-    expect(lean).toMatch(/^_v\/[0-9a-f]{7}\/smartimg\/monkey\.jpg$/)
+    expect(lean).toMatch(/^_v\/[0-9a-f]{7}\/smartimg\/사진\/monkey\.jpg$/)
     expect(rich).not.toBe(lean)
   })
 })

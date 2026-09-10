@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery } from '@tanstack/react-query'
 import { ChevronRight, Folder, Image as ImageIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Button } from '../../components/ui/button'
-import { type ImageObject, listImages } from '../../lib/api'
+import { type ImageObject, type ListImagesResponse, listImages } from '../../lib/api'
 import { ImageDetailsDialog } from './ImageDetailsDialog'
 import { ImageGrid } from './ImageGrid'
 import { UploadPanel } from './UploadPanel'
@@ -82,17 +82,27 @@ function EmptyState() {
   )
 }
 
+/** Prefixes can repeat across pages, and the same folder chip twice is a bug. */
+function uniqueFolders(pages: readonly ListImagesResponse[]): readonly string[] {
+  return [...new Set(pages.flatMap((page) => page.folders))]
+}
+
 export function ImagesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const folder = searchParams.get('folder')
-  const imagesQuery = useQuery({
+  const imagesQuery = useInfiniteQuery({
     queryKey: ['images', folder],
-    queryFn: () => listImages(folder),
+    queryFn: ({ pageParam }) => listImages(folder, pageParam),
+    // A bucket holds more images than one S3 page returns, so the list follows
+    // the server's nextToken instead of showing the first page and stopping.
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage: ListImagesResponse) => lastPage.nextToken ?? undefined,
     refetchInterval: 15_000,
   })
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const objects = imagesQuery.data?.objects ?? []
-  const folders = imagesQuery.data?.folders ?? []
+  const pages = imagesQuery.data?.pages ?? []
+  const objects = pages.flatMap((page) => page.objects)
+  const folders = uniqueFolders(pages)
   const selected: ImageObject | null = objects.find((object) => object.key === selectedKey) ?? null
 
   return (
@@ -101,7 +111,13 @@ export function ImagesPage() {
         <h1 className="text-lg font-semibold">Images</h1>
         <Breadcrumb folder={folder} />
       </div>
-      <UploadPanel folder={folder} />
+      {folder === null ? (
+        <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+          Open a folder to upload into it. Nothing is stored at the root.
+        </p>
+      ) : (
+        <UploadPanel folder={folder} />
+      )}
       {folders.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {folders.map((path) => (
@@ -128,10 +144,26 @@ export function ImagesPage() {
             Retry
           </Button>
         </div>
-      ) : objects.length === 0 ? (
+      ) : objects.length === 0 && !imagesQuery.hasNextPage ? (
+        // A page can come back holding only folders, so "nothing here" is only
+        // true once there is no page left to ask for.
         <EmptyState />
       ) : (
-        <ImageGrid objects={objects} onSelect={setSelectedKey} />
+        <>
+          <ImageGrid objects={objects} onSelect={setSelectedKey} />
+          {imagesQuery.hasNextPage ? (
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={imagesQuery.isFetchingNextPage}
+                onClick={() => void imagesQuery.fetchNextPage()}
+              >
+                {imagesQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
+              </Button>
+            </div>
+          ) : null}
+        </>
       )}
       {selected !== null ? (
         <ImageDetailsDialog
