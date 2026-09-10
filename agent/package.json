@@ -11,6 +11,7 @@
     "@smartimg/shared": "workspace:*",
     "chokidar": "^4.0.0",
     "ky": "^1.7.0",
+    "sharp": "^0.35.4",
     "zod": "^4.0.0"
   },
   "devDependencies": {

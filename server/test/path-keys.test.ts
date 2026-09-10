@@ -1,0 +1,180 @@
+import { describe, expect, it } from 'vitest'
+import { ApiError } from '../src/errors'
+import { buildPathObjectKey, normalizeListPrefix, normalizeSourcePath } from '../src/keys'
+
+const HASH = '9f3a2c1d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9'
+
+describe('normalizeSourcePath', () => {
+  it('lowercases only the share and keeps every other segment verbatim', () => {
+    expect(normalizeSourcePath('Public/1.업무보고서/박홍제/monkey.jpg')).toEqual([
+      'public',
+      '1.업무보고서',
+      '박홍제',
+      'monkey.jpg',
+    ])
+  })
+
+  it('accepts a UNC-style path with backslashes', () => {
+    expect(normalizeSourcePath('Public\\1.업무보고서\\박홍제\\monkey.jpg')).toEqual([
+      'public',
+      '1.업무보고서',
+      '박홍제',
+      'monkey.jpg',
+    ])
+  })
+
+  it('keeps spaces, which real shares use', () => {
+    expect(normalizeSourcePath('Public/오프라인 매장/a.png')).toEqual([
+      'public',
+      '오프라인 매장',
+      'a.png',
+    ])
+  })
+
+  it('refuses traversal', () => {
+    expect(() => normalizeSourcePath('Public/../etc/passwd')).toThrow(ApiError)
+  })
+
+  it('refuses a share that would be read as a transform directive', () => {
+    expect(() => normalizeSourcePath('fit-in/x/a.jpg')).toThrow(ApiError)
+    expect(() => normalizeSourcePath('200x200/a.jpg')).toThrow(ApiError)
+  })
+
+  it('needs a folder between the share and the filename', () => {
+    expect(() => normalizeSourcePath('monkey.jpg')).toThrow(ApiError)
+    expect(() => normalizeSourcePath('smartimg/monkey.jpg')).toThrow(ApiError)
+  })
+})
+
+describe('buildPathObjectKey', () => {
+  it('is the share path, verbatim', () => {
+    const key = buildPathObjectKey({
+      path: 'Public/1.업무보고서/박홍제/monkey.jpg',
+      contentType: 'image/jpeg',
+    })
+    expect(key).toBe('public/1.업무보고서/박홍제/monkey.jpg')
+  })
+
+  it('keeps two source files that differ only by extension apart', () => {
+    const jpg = buildPathObjectKey({ path: 'smartimg/사진/김치.jpg', contentType: 'image/jpeg' })
+    const png = buildPathObjectKey({ path: 'smartimg/사진/김치.png', contentType: 'image/png' })
+    expect(jpg).toBe('smartimg/사진/김치.jpg')
+    expect(png).toBe('smartimg/사진/김치.png')
+    expect(jpg).not.toBe(png)
+  })
+
+  it('maps distinct source paths to distinct keys', () => {
+    const paths = [
+      'smartimg/사진/김치.jpg',
+      'smartimg/사진/김치.png',
+      'smartimg/사진/김치.webp',
+      'smartimg/사진/김치.jpg.webp',
+      'smartimg/사진/김치',
+      'smartimg/김치/사진.jpg',
+    ]
+    const keys = paths.map((path) => buildPathObjectKey({ path, contentType: 'image/jpeg' }))
+    expect(new Set(keys).size).toBe(paths.length)
+  })
+
+  it('refuses a contentType that is not an image', () => {
+    expect(() =>
+      buildPathObjectKey({ path: 'smartimg/사진/김치.jpg', contentType: 'text/html' }),
+    ).toThrow(ApiError)
+  })
+
+  it('gives one stable key per file, so a replacement overwrites it', () => {
+    const before = buildPathObjectKey({ path: 'Public/a/b.jpg', contentType: 'image/jpeg' })
+    const after = buildPathObjectKey({ path: 'Public/a/b.jpg', contentType: 'image/jpeg' })
+    expect(after).toBe(before)
+  })
+
+  it('puts a versioned object under its own prefix, path and name intact', () => {
+    const key = buildPathObjectKey({
+      path: 'Public/1.업무보고서/박홍제/monkey.jpg',
+      contentType: 'image/jpeg',
+      contentHash: HASH,
+    })
+    expect(key).toBe('_v/9f3a2c1/public/1.업무보고서/박홍제/monkey.jpg')
+  })
+
+  // The old rule spliced the digest into the filename, which meant an ordinary
+  // upload of a file named that way landed on a versioned object's key and
+  // overwrote bytes that a year of immutable caching had already been promised.
+  it('cannot be reached by a plain upload, whatever the source file is named', () => {
+    const versioned = buildPathObjectKey({
+      path: 'Public/a/b.jpg',
+      contentType: 'image/jpeg',
+      contentHash: HASH,
+    })
+    const lookalike = buildPathObjectKey({
+      path: 'Public/a/b.9f3a2c1.jpg',
+      contentType: 'image/jpeg',
+    })
+    expect(lookalike).not.toBe(versioned)
+    expect(versioned.startsWith('_v/')).toBe(true)
+  })
+
+  it('refuses a share that would sit where versioned objects live', () => {
+    expect(() =>
+      buildPathObjectKey({ path: '_v/9f3a2c1/a/anything.jpg', contentType: 'image/jpeg' }),
+    ).toThrow(ApiError)
+  })
+
+  it('is stable: the same path and source bytes always give the same key', () => {
+    const once = buildPathObjectKey({
+      path: 'Public/a/b.jpg',
+      contentType: 'image/jpeg',
+      contentHash: HASH,
+    })
+    const twice = buildPathObjectKey({
+      path: 'Public/a/b.jpg',
+      contentType: 'image/jpeg',
+      contentHash: HASH,
+    })
+    expect(once).toBe(twice)
+  })
+
+  it('changes when the source content changes, so the old URL stays valid', () => {
+    const before = buildPathObjectKey({
+      path: 'Public/a/b.jpg',
+      contentType: 'image/jpeg',
+      contentHash: HASH,
+    })
+    const after = buildPathObjectKey({
+      path: 'Public/a/b.jpg',
+      contentType: 'image/jpeg',
+      contentHash: 'deadbee' + HASH.slice(7),
+    })
+    expect(after).not.toBe(before)
+    expect(before).toBe('_v/9f3a2c1/public/a/b.jpg')
+  })
+
+  it('carries an unusual filename across untouched', () => {
+    const key = buildPathObjectKey({ path: 'Public/a/photo.jpeg.txt', contentType: 'image/png' })
+    expect(key).toBe('public/a/photo.jpeg.txt')
+  })
+
+  it('refuses a hash that is not hex', () => {
+    expect(() =>
+      buildPathObjectKey({
+        path: 'Public/a/b.jpg',
+        contentType: 'image/jpeg',
+        contentHash: 'ZZZZZZZ',
+      }),
+    ).toThrow(ApiError)
+  })
+})
+
+describe('normalizeListPrefix', () => {
+  it('reaches the Korean folders the path rule produces', () => {
+    expect(normalizeListPrefix('public/1.업무보고서/박홍제')).toBe('public/1.업무보고서/박홍제')
+  })
+
+  it('is empty at the root', () => {
+    expect(normalizeListPrefix('  ')).toBe('')
+  })
+
+  it('refuses traversal', () => {
+    expect(() => normalizeListPrefix('public/../secrets')).toThrow(ApiError)
+  })
+})

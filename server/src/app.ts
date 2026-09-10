@@ -5,11 +5,11 @@ import { z } from 'zod'
 import { requireAuth } from './auth'
 import type { Config } from './config'
 import { ApiError } from './errors'
-import { assertSafeKey, isAllowedImageMime } from './keys'
+import { assertSafeKey } from './keys'
 import { MockStore } from './mock-store'
 import { imagesApi } from './routes'
 import { createS3Store } from './s3'
-import { CACHE_CONTROL, type ImageStore } from './store'
+import type { ImageStore } from './store'
 
 export function createApp(config: Config): { app: Hono; mockStore: MockStore | null } {
   const app = new Hono()
@@ -37,18 +37,28 @@ export function createApp(config: Config): { app: Hono; mockStore: MockStore | n
   app.route('/api/images', imagesApi(config, store))
 
   if (mockStore !== null) {
+    // Stands in for S3's signature check: an upload may only use the exact
+    // type, size and cache policy the presigned URL was issued for.
     app.put('/mock-put/*', async (c) => {
       const key = c.req.path.replace(/^\/mock-put\//, '')
       assertSafeKey(key)
+      const terms = mockStore.signedTerms(key)
+      if (terms === undefined) {
+        throw new ApiError('unauthorized', 403, 'no presigned upload was issued for this key')
+      }
       const contentType = c.req.header('Content-Type') ?? ''
-      if (!isAllowedImageMime(contentType)) {
-        throw new ApiError('invalid_upload', 400, 'Content-Type must be an allowed image type')
+      const cacheControl = c.req.header('Cache-Control') ?? ''
+      if (contentType !== terms.contentType) {
+        throw new ApiError('invalid_upload', 403, 'Content-Type does not match the signed value')
+      }
+      if (cacheControl !== terms.cacheControl) {
+        throw new ApiError('invalid_upload', 403, 'Cache-Control does not match the signed value')
       }
       const body = new Uint8Array(await c.req.arrayBuffer())
-      if (body.byteLength === 0 || body.byteLength > config.maxUploadBytes) {
-        throw new ApiError('invalid_upload', 400, 'request body exceeds the upload size limit')
+      if (body.byteLength !== terms.contentLength) {
+        throw new ApiError('invalid_upload', 403, 'body does not match the signed Content-Length')
       }
-      mockStore.put(key, body, contentType)
+      mockStore.put(key, body, contentType, cacheControl)
       const digest = await crypto.subtle.digest('SHA-256', body)
       const etag = [...new Uint8Array(digest)]
         .map((byte) => byte.toString(16).padStart(2, '0'))
@@ -65,7 +75,7 @@ export function createApp(config: Config): { app: Hono; mockStore: MockStore | n
       }
       return c.body(object.body, 200, {
         'Content-Type': object.contentType,
-        'Cache-Control': CACHE_CONTROL,
+        'Cache-Control': object.cacheControl,
       })
     })
   }

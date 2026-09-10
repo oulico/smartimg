@@ -1,0 +1,46 @@
+[Unit]
+Description=smartimg NAS share watcher (auto-upload and link list)
+Documentation=https://github.com/oulico/smartimg
+# The share is a network mount, so the unit waits for it rather than racing it.
+After=network-online.target mnt-smartimg.mount smartimg-api.service
+Wants=network-online.target
+Requires=mnt-smartimg.mount
+BindsTo=mnt-smartimg.mount
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PROJECT__/agent
+ExecStart=__BUN__ run src/watch.ts
+Restart=always
+RestartSec=10
+
+Environment=IMAGE_API_URL=http://127.0.0.1:8787/api
+Environment=IMAGE_CDN_BASE=__CDN__
+Environment=SMARTIMG_WATCH_ROOT=/mnt/smartimg
+# CIFS does not deliver inotify events, so the share is polled. Ten seconds is
+# the delay someone sees between dropping a file and its link appearing.
+Environment=SMARTIMG_POLL_MS=10000
+# A file must sit still this long before it is read, so a copy still in flight
+# over SMB is never uploaded half-written.
+Environment=SMARTIMG_SETTLE_MS=4000
+# The API token lives in this file, 0600, not in the unit.
+EnvironmentFile=__PROJECT__/agent/.env
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# The share, for reading images and writing the link list; the state directory,
+# for the record of what has already been uploaded.
+ReadWritePaths=/mnt/smartimg __STATE_DIR__
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=smartimg-watch
+
+[Install]
+WantedBy=multi-user.target

@@ -1,3 +1,12 @@
+import {
+  assertKeySegments,
+  assertPublishableFirstSegment,
+  buildPathObjectKey as buildSharedPathObjectKey,
+  InvalidKeyError,
+  normalizeSourcePath as normalizeSharedSourcePath,
+  type PathObjectKeyInput as SharedPathObjectKeyInput,
+  splitKeySegments,
+} from '@smartimg/shared'
 import { ApiError } from './errors'
 
 const MIME_EXTENSION = {
@@ -14,41 +23,61 @@ export function isAllowedImageMime(mime: string): boolean {
   return mime in MIME_EXTENSION
 }
 
-function extensionForMime(mime: string): string {
-  if (!(mime in MIME_EXTENSION)) {
+function assertAllowedImageMime(mime: string): void {
+  if (!isAllowedImageMime(mime)) {
     throw new ApiError(
       'invalid_upload',
       400,
       'contentType must be one of ' + ALLOWED_MIME_TYPES.join(', '),
     )
   }
+}
+
+function extensionForMime(mime: string): string {
+  assertAllowedImageMime(mime)
   return MIME_EXTENSION[mime as keyof typeof MIME_EXTENSION]
 }
 
-const FOLDER_SEGMENT = /^[a-z0-9][a-z0-9._-]{0,63}$/
-const MAX_FOLDER_SEGMENTS = 4
-const DEFAULT_FOLDER = 'uploads'
-
-export function normalizeFolder(input: string): string {
-  const trimmed = input
-    .trim()
-    .replace(/^\/+|\/+$/g, '')
-    .toLowerCase()
-  if (trimmed === '') return DEFAULT_FOLDER
-  const segments = trimmed.split('/')
-  if (segments.length > MAX_FOLDER_SEGMENTS) {
-    throw new ApiError('invalid_upload', 400, 'folder must have at most 4 segments')
-  }
-  for (const segment of segments) {
-    if (!FOLDER_SEGMENT.test(segment)) {
-      throw new ApiError(
-        'invalid_upload',
-        400,
-        'folder segments must match [a-z0-9][a-z0-9._-]{0,63}',
-      )
+/** The shared key rule reports with its own error; here it is an HTTP 400. */
+function asApiError<T>(build: () => T): T {
+  try {
+    return build()
+  } catch (error) {
+    if (error instanceof InvalidKeyError) {
+      throw new ApiError('invalid_upload', 400, error.message)
     }
+    throw error
   }
+}
+
+/**
+ * A key prefix as the listing hands it back: any segments a key may hold,
+ * Korean and spaces included, so browsing reaches every key the path rule
+ * produces.
+ */
+function normalizeKeyPrefix(input: string, what: string): string {
+  const segments = splitKeySegments(input.trim())
+  asApiError(() => assertKeySegments(segments, what))
   return segments.join('/')
+}
+
+/** Empty means the root of the bucket. */
+export function normalizeListPrefix(input: string): string {
+  return normalizeKeyPrefix(input, 'folder')
+}
+
+/**
+ * The folder an upload is filed under is exactly the prefix given — the one
+ * being browsed, so a file lands where the user is looking. There is no
+ * default: nothing is stored at the root.
+ */
+export function normalizeUploadPrefix(input: string | undefined): string {
+  const prefix = input === undefined ? '' : normalizeKeyPrefix(input, 'folder')
+  if (prefix === '') {
+    throw new ApiError('invalid_upload', 400, 'folder is required')
+  }
+  asApiError(() => assertPublishableFirstSegment(prefix.split('/')[0] ?? ''))
+  return prefix
 }
 
 export function sanitizeFilename(input: string): string {
@@ -67,35 +96,39 @@ export function sanitizeFilename(input: string): string {
 export type ObjectKeyInput = {
   readonly filename: string
   readonly contentType: string
-  readonly folder?: string | undefined
-  readonly now?: Date | undefined
+  readonly folder: string
   readonly uuid?: string | undefined
 }
 
 /**
- * Builds a collision-safe immutable object key:
- * {folder}/{yyyy}/{mm}/{uuid}-{sanitized-name}.{ext}
- * The UUID makes accidental overwrites practically impossible; the server
- * derives the extension from the MIME type so it never trusts the filename.
+ * {prefix}/{uuid}-{sanitized-name}.{ext} — the UUID makes overwrites
+ * practically impossible, and the extension comes from the MIME type so the
+ * filename is never trusted.
  */
 export function buildObjectKey(input: ObjectKeyInput): string {
   const extension = extensionForMime(input.contentType)
-  const now = input.now ?? new Date()
-  const month = (now.getUTCMonth() + 1).toString().padStart(2, '0')
-  const folder = normalizeFolder(input.folder ?? DEFAULT_FOLDER)
+  const prefix = normalizeUploadPrefix(input.folder)
   const uuid = input.uuid ?? crypto.randomUUID()
-  return (
-    folder +
-    '/' +
-    now.getUTCFullYear() +
-    '/' +
-    month +
-    '/' +
-    uuid +
-    '-' +
-    sanitizeFilename(input.filename) +
-    '.' +
-    extension
+  return prefix + '/' + uuid + '-' + sanitizeFilename(input.filename) + '.' + extension
+}
+
+export function normalizeSourcePath(input: string): readonly string[] {
+  return asApiError(() => normalizeSharedSourcePath(input))
+}
+
+export type PathObjectKeyInput = SharedPathObjectKeyInput & { readonly contentType: string }
+
+/**
+ * The key is the share path verbatim (see the shared rule). Without a
+ * contentHash the object is overwritten in place, so it must not be served
+ * with an immutable cache — see mutableCacheControl in store.ts.
+ */
+export function buildPathObjectKey(input: PathObjectKeyInput): string {
+  // The extension is not taken from the MIME type here, but the type is still
+  // checked: only real image types may be signed for upload.
+  assertAllowedImageMime(input.contentType)
+  return asApiError(() =>
+    buildSharedPathObjectKey({ path: input.path, contentHash: input.contentHash }),
   )
 }
 

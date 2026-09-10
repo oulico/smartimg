@@ -15,7 +15,6 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref BucketName
-      AccessControl: Private
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
@@ -24,8 +23,20 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      VersioningConfiguration:
-        Status: Enabled
+      # Not versioned on purpose. Every object here is derived from a source
+      # that lives elsewhere — a NAS share, or the browser upload that made it —
+      # so an overwritten version is re-derivable rather than lost, and keeping
+      # noncurrent versions would only accrue storage for path-mirrored keys,
+      # which are overwritten by design. Versioning can be switched on later if
+      # that calculus changes; it cannot be switched off again, only suspended.
+      # Incomplete multipart uploads are cleaned up so they cannot bill silently.
+      LifecycleConfiguration:
+        Rules:
+          - Id: abort-incomplete-multipart-uploads
+            Status: Enabled
+            Prefix: ''
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -38,7 +49,7 @@ Resources:
               - !Ref AdminOrigin
             AllowedHeaders:
               - '*'
-            ExposeHeaders:
+            ExposedHeaders:
               - ETag
             MaxAge: 3000
 

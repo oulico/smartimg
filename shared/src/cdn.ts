@@ -29,3 +29,12 @@ export function buildImageUrl(base: string, key: string, options?: ImageOptions)
   }
   return trimmedBase + '/' + transformPath(IMAGE_PRESETS[preset]) + '/' + path
 }
+
+/** Every preset URL for one key, in preset order. */
+export function buildPresetUrls(base: string, key: string): Readonly<Record<ImagePreset, string>> {
+  const out = {} as Record<ImagePreset, string>
+  for (const preset of Object.keys(IMAGE_PRESETS) as readonly ImagePreset[]) {
+    out[preset] = buildImageUrl(base, key, { preset })
+  }
+  return out
+}

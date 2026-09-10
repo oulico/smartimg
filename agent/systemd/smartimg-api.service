@@ -1,0 +1,35 @@
+[Unit]
+Description=smartimg API (presigned uploads, listing, delete)
+Documentation=https://github.com/oulico/smartimg
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PROJECT__/server
+# Bun reads server/.env from this directory: bucket, region, API token and the
+# IAM key. That file holds the only long-lived AWS credential in the system, so
+# it stays 0600 and never enters the unit file.
+ExecStart=__BUN__ run src/index.ts
+Restart=always
+RestartSec=5
+
+# The API is reached only by the watcher on this host; nothing outside needs it.
+Environment=PORT=8787
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__PROJECT__
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=smartimg-api
+
+[Install]
+WantedBy=multi-user.target
